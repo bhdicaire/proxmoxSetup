@@ -6,9 +6,14 @@ PVE is based on [Debian GNU/Linux](https://www.debian.org/) including security u
 
 ## What problem does it solve and why is it useful?
 
-Setup one or several [PVE](https://pve.proxmox.com) with everything configured properly with easy-to-understand instructions that automate the installation and configuration from the bare metal.
+Setup one or several [PVE](https://pve.proxmox.com) with easy-to-understand instructions that automate the installation and configuration from the bare metal.
+<details>
+<summary>Everything is configured properly</summary>
+* Disable the enterprise repo, enable the public repo, and add non-free sources
+* Remove subscription banner
+</details>
 
-FYI, my [build of material (BoM)](docs/bom.md) used the x86-64 architecture.
+FYI, my [build of material (BoM)](docs/bom.md) use the x86-64 architecture.
 
 ## Initial setup
 
