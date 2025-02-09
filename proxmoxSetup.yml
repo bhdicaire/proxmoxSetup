@@ -1,0 +1,65 @@
+---
+# -----------------------------------------------------------------------------------
+# macSetup according to my opinionated standards
+# Modified by: Benoît H. Dicaire
+# https://GitHub.com/bhdicaire/macSetup
+# -----------------------------------------------------------------------------------
+
+# ansible-playbook deplyment.yml -i hosts --extra-vars "host=droplets"
+# ansible-playbook server.yml --extra-vars "variable_host=newtarget(s)"
+
+- name: "Proxmox PVE provisioning playbook"
+  hosts: pve
+  user: root
+  serial: 1
+
+# ------------------------------------------------------------
+# ROLES
+# ------------------------------------------------------------
+
+  tasks:
+
+  - name: "Onboard new PVE host"
+    role: onboard
+    when: allo is not defined
+     
+  - name: Download LXC template Debian 11
+    community.general.proxmox_template:
+    node: "{{ item }}"
+      api_host: pve3.local
+      api_user: "{{ proxmox_api_user }}"
+      api_token_id: "{{ proxmox_token_id }}"
+      api_token_secret: "{{ api_token_secret }}"
+      storage: local
+      content_type: vztmpl
+      template: debian-11-standard_11.7-1_amd64.tar.zst
+      loop:
+        - pve1
+        - pve2
+        - pve3
+
+#     - name: Create VM k3s-{{ item }}
+#       community.general.proxmox:
+#         node: pve{{ item }}
+#         hostname: "k3s-{{ item }}"
+#         password: "{{ lxc_root_password }}"
+#         api_host: pve{{ item }}.local
+#         api_user: root@pam
+#         api_token_id: ansible
+#         api_token_secret: "{{ api_token_secret }}"
+#         storage: local-lvm
+#         ostemplate: 'local:vztmpl/debian-11-standard_11.7-1_amd64.tar.zst'
+#         tags: #tags only work on first provision
+#         - "k3s"
+#         pubkey: "{{ lookup('file', '~/.ssh/foobar.pub') }}"
+#         memory: 8192
+#         swap: 0
+#         unprivileged: false
+#         onboot: true
+#         # state: absent
+#         state: present
+#         netif: '{"net0":"name=eth0,gw=192.168.1.1,ip=192.168.1.{{ 110 + item }}/24,bridge=vmbr0"}'
+#       loop:
+#         - 1
+#         - 2
+#         - 3

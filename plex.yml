@@ -1,0 +1,42 @@
+
+- name: "Proxmox PVE provisioning playbook"
+  hosts: plex
+  user: root
+  serial: 1
+
+  tasks:
+
+    - name: Add a signing key for Plex repository
+      ansible.builtin.apt_key:
+        url: https://downloads.plex.tv/plex-keys/PlexSign.key 
+        state: present
+    
+    - name: Add Plex repository
+      apt_repository:
+        repo: "{{ item }}"
+        state: present
+        filename: sources
+        validate_certs: true
+      with_items:
+        - "deb https://downloads.plex.tv/repo/deb/ public main"
+    
+    - name: Update APT package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 7200
+    
+    - name: Install Plex
+      ansible.builtin.apt:
+        pkg:
+        - plexmediaserver
+    
+    - name: Enable Plex Service
+      systemd:
+        enabled: yes
+        masked: no
+        name: plexmediaserver
+    
+    - name: Start Plex Service
+      systemd:
+        state: started
+        name: plexmediaserver

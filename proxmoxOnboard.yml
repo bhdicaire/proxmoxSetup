@@ -1,0 +1,34 @@
+---
+# -----------------------------------------------------------------------------------
+# macSetup according to my opinionated standards
+# Modified by: Benoît H. Dicaire
+# https://GitHub.com/bhdicaire/macSetup
+# -----------------------------------------------------------------------------------
+
+# ansible-playbook deplyment.yml -i hosts --extra-vars "host=droplets"
+# ansible-playbook server.yml --extra-vars "variable_host=newtarget(s)"
+
+- name: "Proxmox PVE provisioning playbook"
+  hosts: pve
+  user: root
+
+#   pre_tasks:
+# 
+#    - name: "Install LXC role"
+#      community.general.ansible_galaxy_install:
+#       type: collection
+#       name: cielito.proxmox
+#       dest: roles/
+     
+# ------------------------------------------------------------
+# ROLES
+# ------------------------------------------------------------
+  
+  roles:
+   - name: "Onboard new PVE host"
+     role: onboard
+
+#    - name: "Setup User Preferences"
+#      role: cielito.proxmox.create_lxc
+#      tags: ['usefPref']
+

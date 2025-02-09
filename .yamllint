@@ -1,0 +1,16 @@
+---
+# https://yamllint.readthedocs.io/en/stable/rules.html
+
+extends: default
+
+rules:
+  comments-indentation: disable
+  trailing-spaces:      disable
+  colons:
+    max-spaces-after:   12
+  line-length:
+    max: 180
+    level: warning
+
+ignore: |
+  .github/stale.yml

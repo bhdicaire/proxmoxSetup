@@ -1,0 +1,7 @@
+*.vagrant
+.DS_Store
+*.retry
+roles*
+/.cache
+WiP
+ansible.log
