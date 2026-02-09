@@ -1,0 +1,38 @@
+# After the first run, access Calibre-Web at http://<vm-ip>:8083.
+#     Default Login: admin / admin123
+#     Library Path: Set it to /opt/calibre-library (or your custom path).
+
+- name: Install NFS and Calibre Deps
+  apt:
+    name: [nfs-common, python3-venv, python3-pip, wget, xz-utils]
+    state: present
+
+- name: Mount Unifi uNAS Library
+  ansible.posix.mount:
+    src: "192.168.1.50:/volume1/books"
+    path: "/opt/calibre-library"
+    opts: "rw,soft,intr"
+    state: mounted
+    fstype: nfs
+
+- name: Install Calibre Binary
+  shell: "wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sh /dev/stdin"
+  args:
+    creates: /usr/bin/calibre-server
+
+- name: Initialize Empty Library if missing
+  command: "calibredb add --empty --with-library /opt/calibre-library"
+  args:
+    creates: "/opt/calibre-library/metadata.db"
+
+- name: Setup Calibre-Web VENV
+  pip:
+    name: calibreweb
+    virtualenv: /opt/calibre-web/venv
+    virtualenv_command: python3 -m venv
+
+- name: Deploy Calibre-Web Service
+  template:
+    src: calibre-web.service.j2
+    dest: /etc/systemd/system/calibre-web.service
+  notify: Restart Calibre-Web

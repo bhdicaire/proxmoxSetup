@@ -1,0 +1,13 @@
+[Unit]
+Description=Calibre-Web
+After=network.target
+
+[Service]
+Type=simple
+User={{ calibre_web_user }}
+WorkingDirectory=/opt/calibre-web
+ExecStart=/opt/calibre-web/venv/bin/cps -p {{ calibre_web_port }}
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

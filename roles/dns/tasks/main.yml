@@ -1,0 +1,147 @@
+---
+# Ansible templates your local DNS records into a JS file.
+# Docker spins up a small container with the DNSControl binary.
+# DNSControl compares your file to what is currently live on Cloudflare.
+# Cloudflare API is updated only with the necessary changes (Idempotency).
+
+# Lifecycle: Ephemeral: Runs for 5 seconds, pushes DNS, and disappears.
+# Complexity: Low One command to run the official image.
+
+# Split-Horizon DNS
+# External (Cloudflare): proxmox.d5e.dev points to your Public IP (or a Tunnel).
+# Internal (AdGuard): proxmox.d5e.dev points to 192.168.1.5 (the local IP).
+
+- name: Get current Public IP
+  uri:
+    url: https://api.ipify.org?format=json
+  register: public_ip_lookup
+
+- name: Set Public IP fact
+  set_fact:
+    current_public_ip: "{{ public_ip_lookup.json.ip }}"
+
+- name: Provision Cloudflare Tunnel LXC
+  community.proxmox.proxmox_nicer_lxc:
+    node: "{{ pve_node }}"
+    vmid: 300
+    hostname: "cf-tunnel"
+    ostemplate: "local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst"
+    unprivileged: yes
+    state: started
+
+- name: Install and Configure Cloudflared
+  community.proxmox.proxmox_lxc_make_shell_command:
+    vmid: 300
+    command: |
+      curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+      dpkg -i cloudflared.deb
+      # Run the tunnel as a service using the token from 1Password
+      cloudflared service install {{ lookup('community.general.onepassword', 'Cloudflare Tunnel Token', field='password') }}
+
+- name: Upload Tunnel Config
+  template:
+    src: config.yml.j2
+    dest: /etc/cloudflared/config.yml # This would be done via an Ansible copy/template to the LXC
+    
+- name: Restart Tunnel to apply routes
+  community.proxmox.proxmox_lxc_make_shell_command:
+    vmid: 300
+    command: "systemctl restart cloudflared"
+
+- name: Proxmox DNS & AdGuard Home Management
+  hosts: localhost
+  connection: local
+  vars:
+    # 1Password Lookups
+    pve_api_token: "{{ lookup('community.general.onepassword', 'Proxmox API', field='credential') }}"
+    cf_token: "{{ lookup('community.general.onepassword', 'Cloudflare API', field='credential') }}"
+    adguard_pass: "{{ lookup('community.general.onepassword', 'AdGuard Admin', field='password') }}"
+    
+    # Infrastructure Config
+    pve_node: "pve-01"
+    adguard_lxc_id: 200
+    adguard_ip: "192.168.1.2"
+    domain: "d5e.dev"
+    dnscontrol_path: "/tmp/dnscontrol"
+
+  tasks:
+    ## 1. PROVISION ADGUARD HOME LXC
+    - name: Ensure AdGuard Home LXC exists
+      community.proxmox.proxmox_nicer_lxc: # Using the standard lxc module
+        node: "{{ pve_node }}"
+        vmid: "{{ adguard_lxc_id }}"
+        hostname: "adguard-dns"
+        password: "{{ adguard_pass }}"
+        ostemplate: "local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst"
+        networks:
+          net0: "name=eth0,bridge=vmbr0,ip={{ adguard_ip }}/24,gw=192.168.1.1"
+        unprivileged: yes
+        state: started
+
+    ## 2. INSTALL ADGUARD HOME (Via Shell in LXC)
+    - name: Install AdGuard Home inside LXC
+      community.proxmox.proxmox_lxc_make_shell_command:
+        vmid: "{{ adguard_lxc_id }}"
+        command: "curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v"
+
+    ## 3. GATHER INVENTORY DATA
+    - name: Fetch VM list from Proxmox
+      community.proxmox.proxmox_vm_info:
+        api_host: "{{ pve_node }}"
+        api_user: "ansible@pve"
+        api_token_id: "ansible-token"
+        api_token_secret: "{{ pve_api_token }}"
+      register: proxmox_vms
+
+    ## 4. EXTERNAL DNS (CLOUDFLARE)
+    - name: Setup DNSControl Environment
+      file:
+        path: "{{ dnscontrol_path }}"
+        state: directory
+        mode: '0700'
+
+    - name: Template DNSControl Configs
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ dnscontrol_path }}/{{ item.dest }}"
+      loop:
+        - { src: 'dnsconfig.js.j2', dest: 'dnsconfig.js' }
+        - { src: 'creds.json.j2', dest: 'creds.json' }
+
+    - name: Push to Cloudflare (Docker)
+      community.docker.docker_container:
+        name: dnscontrol_sync
+        image: stackexchange/dnscontrol
+        volumes: ["{{ dnscontrol_path }}:/dns"]
+        command: push
+        cleanup: yes
+
+    ## 5. INTERNAL DNS (ADGUARD REWRITES)
+    - name: Apply Split-Horizon Rewrites to AdGuard
+      community.dns.adguardhome_rewrite:
+        url: "http://{{ adguard_ip }}"
+        username: "admin"
+        password: "{{ adguard_pass }}"
+        domain: "{{ item.name }}.{{ domain }}"
+        answer: "{{ item.ipconfig0.split(',')[0].split('=')[1].split('/')[0] }}"
+        state: present
+      loop: "{{ proxmox_vms.proxmox_vms | selectattr('status', 'equalto', 'running') | list }}"
+      when: item.ipconfig0 is defined
+      
+    - name: Add local DNS rewrites for Caddy services
+      community.dns.adguardhome_rewrite:
+        url: "http://{{ adguard_ip }}"
+        username: "admin"
+        password: "{{ adguard_password }}"
+        # We point every VM name to CADDY's IP, not the VM's IP
+        domain: "{{ item.name }}.{{ domain }}"
+        answer: "{{ caddy_ip }}"
+        state: present
+      loop: "{{ proxmox_vms.proxmox_vms }}"
+      when: "'public' in item.notes"
+
+    ## 6. CLEANUP
+    - name: Shred Secrets
+      file:
+        path: "{{ dnscontrol_path }}"
+        state: absent

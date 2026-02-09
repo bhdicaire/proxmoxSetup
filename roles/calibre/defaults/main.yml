@@ -1,0 +1,20 @@
+# Proxmox Connection
+pve_api_host: "192.168.1.100"
+pve_api_user: "root@pam"
+pve_api_password: "your_password"
+pve_node: "pve-01"
+
+# VM Config
+vm_id: 200
+vm_name: "calibre-server"
+vm_template: "debian-13-cloudinit"
+
+# App Config
+calibre_library_path: "/opt/calibre-library"
+calibre_web_port: 8083
+calibre_web_user: "calibre"
+
+# NFS Settings
+nas_nfs_server: "192.168.1.50"  # Replace with your Unifi uNAS IP
+nas_nfs_path: "/volume1/books"  # Replace with your actual export path
+nfs_mount_opts: "rw,soft,intr,tcp,timeo=14,retrans=2"

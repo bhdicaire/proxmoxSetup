@@ -1,0 +1,13 @@
+tunnel: {{ tunnel_uuid }}
+credentials-file: /etc/cloudflared/tunnel-creds.json
+
+ingress:
+  # Route all traffic for your domain to the Caddy LXC/VM
+  - hostname: "*.{{ domain }}"
+    service: http://{{ caddy_ip }}:80
+
+  - hostname: "{{ domain }}"
+    service: http://{{ caddy_ip }}:80
+
+  # Catch-all 404
+  - service: http_status:404

@@ -1,0 +1,10 @@
+# Proxmox LXC Config
+caddy_lxc_id: 101
+caddy_lxc_ip: "192.168.1.50/24"
+caddy_lxc_gw: "192.168.1.1"
+caddy_lxc_bridge: "vmbr0"
+
+# Caddy Config
+caddy_domain: "books.yourdomain.com"
+calibre_web_internal_ip: "192.168.1.200" # The IP of your Calibre VM
+calibre_web_port: 8083

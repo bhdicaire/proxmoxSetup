@@ -1,0 +1,23 @@
+var REG_NONE = NewRegistrar("none");
+var CLOUDFLARE = NewDnsProvider("cloudflare");
+
+// Your Tunnel UUID (get this from the Cloudflare Dashboard)
+var TUNNEL_ID = "{{ tunnel_uuid }}.cfargotunnel.com";
+
+D("{{ domain }}", REG_NONE, DnsProvider(CLOUDFLARE),
+    // Point the root and wildcard to the tunnel
+    CNAME("@", TUNNEL_ID),
+    CNAME("*", TUNNEL_ID),
+
+    // Manual Records
+    A("@", "1.2.3.4"),
+
+    // Dynamic Proxmox Records (Internal Only)
+    // We still keep these so your AdGuard Split-Horizon works!
+    {% for vm in proxmox_vms.proxmox_vms %}
+    {% if vm.status == 'running' and vm.ipconfig0 is defined %}
+    // Note: These won't be pushed to Cloudflare if we filter them, 
+    // but they will stay in your local AdGuard.
+    {% endif %}
+    {% endfor %}
+);

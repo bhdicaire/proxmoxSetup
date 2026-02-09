@@ -1,0 +1,123 @@
+# Ansible templates your local DNS records into a JS file.
+# Docker spins up a small container with the DNSControl binary.
+# DNSControl compares your file to what is currently live on Cloudflare.
+# Cloudflare API is updated only with the necessary changes (Idempotency).
+
+# Lifecycle: Ephemeral: Runs for 5 seconds, pushes DNS, and disappears.
+# Complexity: Low One command to run the official image.
+
+# Split-Horizon DNS
+# External (Cloudflare): proxmox.d5e.dev points to your Public IP (or a Tunnel).
+# Internal (AdGuard): proxmox.d5e.dev points to 192.168.1.5 (the local IP).
+
+- name: Get current VM list from Proxmox
+  community.proxmox.proxmox_vm_info:
+    api_host: "proxmox.local"
+    api_user: "ansible@pve"
+    api_token_id: "ansible-token"
+    api_token_secret: "{{ lookup('onepassword', 'Proxmox API Token', field='password') }}"
+  register: proxmox_vms
+  delegate_to: localhost
+
+- name: Construct dynamic DNS list
+  set_fact:
+    dynamic_dns_records: >-
+      {{
+        proxmox_vms.proxmox_vms 
+        | selectattr('status', 'equalto', 'running') 
+        | map('dict2items') 
+        | map('rejectattr', 'key', 'equalto', 'template')
+        | map('items2dict')
+        | list
+      }}
+
+# --- TASK 1: CLOUDFLARE (EXTERNAL) ---
+- name: Push External DNS to Cloudflare
+  community.docker.docker_container:
+    name: dnscontrol_push
+    image: stackexchange/dnscontrol
+    volumes:
+      - "{{ dnscontrol_path }}:/dns"
+    command: push
+    cleanup: yes  # Ensures the container is removed immediately after running
+  register: cloudflare_result
+
+# --- TASK 2: ADGUARD HOME (INTERNAL) ---
+- name: Push Internal DNS to AdGuard Home (Split Horizon)
+  community.dns.adguardhome_rewrite:
+    url: "http://192.168.1.2" # Your AdGuard Home IP
+    username: "admin"
+    password: "{{ lookup('onepassword', 'AdGuard Home', field='password') }}"
+    domain: "{{ item.name }}.d5e.dev"
+    answer: "{{ item.ipconfig0.split(',')[0].split('=')[1].split('/')[0] }}"
+    state: present
+  loop: "{{ dynamic_dns_records }}"
+  no_log: true # Keeps passwords out of logs
+
+- name: Add local wildcard rewrite
+  community.dns.adguardhome_rewrite:
+    url: "http://192.168.1.2"
+    username: "admin"
+    password: "{{ adguard_pass }}"
+    domain: "*.d5e.dev"
+    answer: "192.168.1.10" # Point this to your Reverse Proxy IP
+    state: present
+
+# --- TASK 3: CLEANUP ---
+- name: Shred temporary credential files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ dnscontrol_path }}/creds.json"
+    - "{{ dnscontrol_path }}/dnsconfig.js"
+
+
+# - name: Create temporary config directory
+#   file:
+#     path: "{{ dnscontrol_path }}"
+#     state: directory
+#     mode: '0700'
+# 
+# - name: Template DNS configuration
+#   template:
+#     src: dnsconfig.js.j2
+#     dest: "{{ dnscontrol_path }}/dnsconfig.js"
+# 
+# - name: Deploy temporary Cloudflare credentials from 1Password
+#   template:
+#     src: creds.json.j2
+#     dest: "{{ dnscontrol_path }}/creds.json"
+#     mode: '0600'
+#   no_log: true  # Prevents the token from appearing in Ansible logs
+# 
+# - name: Preview DNS changes (Dry Run)
+#   community.docker.docker_container:
+#     name: dnscontrol_preview
+#     image: stackexchange/dnscontrol
+#     volumes: ["{{ dnscontrol_path }}:/dns"]
+#     command: preview
+#     detach: false
+#     cleanup: true
+#   register: dns_preview
+# 
+# - name: Show what would change
+#   debug:
+#     var: dns_preview.stdout_lines
+# 
+# - name: Execute DNSControl Push (via Docker)
+#   community.docker.docker_container:
+#     name: dnscontrol_run
+#     image: stackexchange/dnscontrol:latest
+#     volumes:
+#       - "{{ dnscontrol_path }}/dnsconfig.js:/dns/dnsconfig.js"
+#       - "{{ dnscontrol_path }}/creds.json:/dns/creds.json"
+#     command: push
+#     detach: false
+#     cleanup: true
+# 
+# - name: Securely remove Cloudflare credentials
+#   file:
+#     path: "{{ dnscontrol_path }}/creds.json"
+#     state: absent
+# 
