@@ -13,10 +13,10 @@ search_domain: "home.lan"
 ssh_public_key_path: "~/.ssh/ops.pub"
 
 # --- Proxmox API (used by lxc_container role) ---
-proxmox_api_host: "{{ lookup('community.general.onepassword', 'PVE02', field='apiHost', section='API') }}"
-proxmox_api_user: "{{ lookup('community.general.onepassword', 'PVE02', field='apiUser', section='API') }}"
-proxmox_api_token_id: "{{ lookup('community.general.onepassword', 'PVE02', field='tokenId', section='API') }}"
-proxmox_api_token_secret: "{{ lookup('community.general.onepassword', 'PVE02', field='tokenSecret', section='API') }}"
+proxmox_api_host: "{{ lookup('community.general.onepassword', 'PVE-01', field='apiHost', section='API') }}"
+proxmox_api_user: "{{ lookup('community.general.onepassword', 'PVE-01', field='apiUser', section='API') }}"
+proxmox_api_token_id: "{{ lookup('community.general.onepassword', 'PVE-01', field='tokenId', section='API') }}"
+proxmox_api_token_secret: "{{ lookup('community.general.onepassword', 'PVE-01', field='tokenSecret', section='API') }}"
 
 # --- Proxmox Repos ---
 pve_enterprise_sources_to_remove:
