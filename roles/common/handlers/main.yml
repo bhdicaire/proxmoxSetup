@@ -8,3 +8,8 @@
   systemd:
     name: pveproxy
     state: restarted
+
+- name: Reboot and wait
+  reboot:
+    reboot_timeout: 300
+    msg: "Ansible: rebooting PVE"

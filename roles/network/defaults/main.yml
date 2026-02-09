@@ -1,7 +1,0 @@
----
-# NIC renaming defaults (override in host_vars per node)
-network_interfaces: []
-
-# Post-reboot connection settings
-network_flip_delay: 10
-network_flip_timeout: 300

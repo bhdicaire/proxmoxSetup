@@ -2,3 +2,10 @@
 pve_enterprise_sources_to_remove: []
 pve_iso_images: []
 pve_lxc_templates: []
+
+# NIC renaming defaults (override in host_vars per node)
+network_interfaces: []
+
+# Post-reboot connection settings
+network_flip_delay: 10
+network_flip_timeout: 300

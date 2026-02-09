@@ -65,12 +65,14 @@
   apt:
     upgrade: dist
 
-# --- UI TWEAKS ---
 - name: Disable "No valid subscription" nag
-  replace:
-    path: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
-    regexp: 'res === null \|\| res === undefined \|\| !res \|\| res\.data\.status\.toLowerCase\(\) !== ''active'''
-    replace: 'false'
+  ansible.builtin.shell:
+    cmd: >-
+      sed -Ezi.bak
+      "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g"
+      /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+  args:
+    creates: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js.bak
   notify: Restart PVEProxy
 
 # --- CONSOLE BANNER ---
@@ -78,7 +80,7 @@
   copy:
     dest: /etc/issue
     content: |
-      Welcome to the Proxmox Virtual Environment.
+      Welcome to the Proxmox Virtual Environment
       Please use your web browser to configure this server - connect to:
         https://{{ ansible_host }}:8006/
 
@@ -92,6 +94,13 @@
     path: /etc/hosts
     regexp: '127\.0\.1\.1.*'
     line: "127.0.1.1 {{ inventory_hostname }}"
+
+# --- DISABLE IPv6 ---
+- name: Deploy sysctl config to disable IPv6
+  template:
+    src: 99-disable-ipv6.conf.j2
+    dest: /etc/sysctl.d/99-disable-ipv6.conf
+  notify: Reboot and wait
 
 # --- LXC TEMPLATES ---
 - name: Update template catalog

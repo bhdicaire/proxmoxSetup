@@ -5,5 +5,3 @@
   roles:
     - role: common
       tags: common
-    - role: network
-      tags: network
