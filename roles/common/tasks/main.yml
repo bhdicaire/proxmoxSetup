@@ -12,6 +12,13 @@
     state: present
     key: "{{ lookup('file', ssh_public_key_path) }}"
 
+# - name: Disable root SSH login
+#   lineinfile:
+#     path: /etc/ssh/sshd_config
+#     regexp: '^#?PermitRootLogin'
+#     line: 'PermitRootLogin no'
+#   notify: restart sshd
+  
 # --- SYSTEM CONFIG (TIME & NTP) ---
 - name: Set system timezone
   timezone:

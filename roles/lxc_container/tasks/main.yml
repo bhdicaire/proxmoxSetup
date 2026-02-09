@@ -19,6 +19,7 @@
     unprivileged: "{{ lxc_unprivileged }}"
     state: "{{ lxc_state }}"
   delegate_to: localhost
+  become: false            # ← API call, no sudo needed
 
 - name: Start container
   community.general.proxmox:
@@ -30,3 +31,4 @@
     state: started
   delegate_to: localhost
   when: lxc_state == 'present'
+  become: false            # ← same

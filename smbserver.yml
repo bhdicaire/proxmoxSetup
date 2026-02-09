@@ -2,12 +2,13 @@
 # Phase 1: Create the container (runs against Proxmox host)
 - name: Provision SMB server container
   hosts: pve_nodes
+  become: true          # ← needs sudo to interact with Proxmox
   roles:
     - lxc_container
 
 # Phase 2: Configure the container (runs inside it)
 - name: Configure SMB server
   hosts: albert
-  become: true
+  become: true          # ← needs sudo inside the container
   roles:
     - samba_nfs
