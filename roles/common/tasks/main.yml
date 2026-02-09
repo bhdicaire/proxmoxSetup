@@ -6,7 +6,7 @@
     state: present
     key: "{{ lookup('file', ssh_public_key_path) }}"
 
-- name: Ensure 1Password SSH key is authorized for root
+- name: Ensure 1Password SSH key is authorized for ops
   ansible.posix.authorized_key:
     user: ops
     state: present
