@@ -2,7 +2,7 @@
 # --- LXC Container ---
 lxc_vmid: 110
 lxc_hostname: albert
-lxc_node: pve-02
+lxc_node: pve-01
 lxc_disk: 8
 lxc_mac: "02:00:00:00:01:10"
 lxc_vlan_id: "30"

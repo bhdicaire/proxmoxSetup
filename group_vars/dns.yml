@@ -20,13 +20,6 @@ pve_api_user: "ansible@pve"
 adguard_ip: "192.168.1.2"
 caddy_ip: "192.168.1.10" # Your Caddy Reverse Proxy
 
-# --- 1Password Secret Mappings ---
-# These assume the item titles in 1Password match exactly
-proxmox_token: "{{ lookup('community.general.onepassword', 'Proxmox API', field='password') }}"
-cloudflare_token: "{{ lookup('community.general.onepassword', 'Cloudflare API', field='password') }}"
-tunnel_token: "{{ lookup('community.general.onepassword', 'Cloudflare Tunnel Token', field='password') }}"
-adguard_password: "{{ lookup('community.general.onepassword', 'AdGuard Admin', field='password') }}"
-
 my_services:
   - { subdomain: "books", ip: "192.168.1.200", port: 8083 }
   - { subdomain: "plex", ip: "192.168.1.210", port: 32400 }
