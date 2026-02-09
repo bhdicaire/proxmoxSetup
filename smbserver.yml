@@ -1,0 +1,13 @@
+---
+# Phase 1: Create the container (runs against Proxmox host)
+- name: Provision SMB server container
+  hosts: pve_nodes
+  roles:
+    - lxc_container
+
+# Phase 2: Configure the container (runs inside it)
+- name: Configure SMB server
+  hosts: albert
+  become: true
+  roles:
+    - samba_nfs

@@ -1,0 +1,7 @@
+---
+nfs_mount_point: "/mnt/nas"
+nfs_opts: "defaults"
+samba_workgroup: "WORKGROUP"
+samba_group: "sambashare"
+samba_shares: []
+samba_users: []

@@ -1,0 +1,10 @@
+---
+- name: Restart Timesyncd
+  systemd:
+    name: systemd-timesyncd
+    state: restarted
+
+- name: Restart PVEProxy
+  systemd:
+    name: pveproxy
+    state: restarted

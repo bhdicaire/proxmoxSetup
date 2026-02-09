@@ -1,0 +1,70 @@
+---
+- name: Install samba and nfs
+  apt:
+    name:
+      - samba
+      - nfs-common
+    state: present
+    update_cache: true
+
+- name: Create NFS mount point
+  file:
+    path: "{{ nfs_mount_point }}"
+    state: directory
+
+- name: Mount NFS share
+  ansible.posix.mount:
+    path: "{{ nfs_mount_point }}"
+    src: "{{ nfs_server }}:{{ nfs_share }}"
+    fstype: nfs
+    opts: "{{ nfs_opts }}"
+    state: mounted
+
+- name: Create share directories
+  file:
+    path: "{{ item.path }}"
+    state: directory
+    group: "{{ samba_group }}"
+    mode: '0775'
+  loop: "{{ samba_shares }}"
+
+- name: Ensure samba group exists
+  group:
+    name: "{{ samba_group }}"
+    state: present
+
+- name: Create Linux users for Samba
+  user:
+    name: "{{ item.name }}"
+    groups: "{{ samba_group }}"
+    append: true
+    shell: /usr/sbin/nologin
+    create_home: false
+  loop: "{{ samba_users }}"
+  no_log: true
+
+- name: Check if Samba user exists
+  command: pdbedit -L {{ item.name }}
+  loop: "{{ samba_users }}"
+  register: samba_user_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Set Samba passwords for new users
+  shell: |
+    printf '%s\n%s\n' '{{ item.item.password }}' '{{ item.item.password }}' | smbpasswd -s -a {{ item.item.name }}
+  loop: "{{ samba_user_check.results }}"
+  when: item.rc != 0
+  no_log: true
+
+- name: Enable Samba users
+  command: smbpasswd -e {{ item.name }}
+  loop: "{{ samba_users }}"
+  changed_when: true
+
+- name: Deploy smb.conf
+  template:
+    src: smb.conf.j2
+    dest: /etc/samba/smb.conf
+  notify: restart samba

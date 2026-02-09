@@ -1,0 +1,32 @@
+[global]
+   workgroup = {{ samba_workgroup }}
+   server string = {{ lxc_hostname }}
+   server role = standalone server
+   log file = /var/log/samba/log.%m
+   max log size = 1000
+   logging = file
+
+   map to guest = bad user
+   usershare allow guests = yes
+
+   # Performance tuning for NFS-backed shares
+   socket options = TCP_NODELAY IPTOS_LOWDELAY
+   read raw = yes
+   write raw = yes
+   use sendfile = no
+   aio read size = 0
+   aio write size = 0
+
+{% for share in samba_shares %}
+[{{ share.name }}]
+   comment = {{ share.comment | default(share.name) }}
+   path = {{ share.path }}
+   browseable = {{ share.browseable | default('yes') }}
+   read only = {{ share.read_only | default('no') }}
+   guest ok = {{ share.guest_ok | default('no') }}
+   valid users = {{ share.valid_users | default('@' + samba_group) }}
+   create mask = {{ share.create_mask | default('0664') }}
+   directory mask = {{ share.directory_mask | default('0775') }}
+   force group = {{ share.force_group | default(samba_group) }}
+
+{% endfor %}

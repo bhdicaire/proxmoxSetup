@@ -1,0 +1,3 @@
+{% for nic in network_interfaces %}
+SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="{{ nic.mac }}", NAME="{{ nic.new_name }}"
+{% endfor %}

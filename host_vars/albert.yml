@@ -1,0 +1,35 @@
+---
+# --- LXC Container ---
+lxc_vmid: 110
+lxc_hostname: albert
+lxc_node: pve-02
+lxc_disk: 8
+lxc_mac: "02:00:00:00:01:10"
+lxc_vlan_id: "30"
+lxc_netif: '{"net0":"name=eth0,bridge=vmbr0,tag={{ lxc_vlan_id }},hwaddr={{ lxc_mac }},ip=dhcp"}'
+lxc_features:
+  - mount=nfs
+
+# --- NFS ---
+nfs_server: "172.30.30.17"
+nfs_share: "/var/nfs/shared/albert/mnt"
+
+# --- Samba Shares ---
+samba_shares:
+  - name: media
+    path: "/mnt/nas/media"
+    guest_ok: "yes"
+    read_only: "yes"
+  - name: coucou
+    path: "/mnt/nas/coucou"
+    guest_ok: "yes"
+    read_only: "yes"
+
+# --- Samba Users ---
+samba_users:
+  - name: "{{ lookup('community.general.onepassword', 'PVE02', field='userName1', section='Albert') }}"
+    password: "{{ lookup('community.general.onepassword', 'PVE02', field='password1', section='Albert') }}"
+  - name: "{{ lookup('community.general.onepassword', 'PVE02', field='userName2', section='Albert') }}"
+    password: "{{ lookup('community.general.onepassword', 'PVE02', field='password2', section='Albert') }}"
+  - name: "{{ lookup('community.general.onepassword', 'PVE02', field='userName3', section='Albert') }}"
+    password: "{{ lookup('community.general.onepassword', 'PVE02', field='password3', section='Albert') }}"

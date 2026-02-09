@@ -1,0 +1,106 @@
+---
+# --- AUTHENTICATION ---
+- name: Ensure 1Password SSH key is authorized for root
+  ansible.posix.authorized_key:
+    user: root
+    state: present
+    key: "{{ lookup('file', ssh_public_key_path) }}"
+
+- name: Ensure 1Password SSH key is authorized for root
+  ansible.posix.authorized_key:
+    user: ops
+    state: present
+    key: "{{ lookup('file', ssh_public_key_path) }}"
+
+# --- SYSTEM CONFIG (TIME & NTP) ---
+- name: Set system timezone
+  timezone:
+    name: "{{ timezone }}"
+
+- name: Ensure systemd-timesyncd is installed
+  apt:
+    name: systemd-timesyncd
+    state: present
+
+- name: Configure NTP
+  lineinfile:
+    path: /etc/systemd/timesyncd.conf
+    regexp: '^#?NTP='
+    line: "NTP={{ ntp_server }}"
+  notify: Restart Timesyncd
+
+# --- REPOSITORY MANAGEMENT ---
+- name: Remove problematic Enterprise source files
+  file:
+    path: "/etc/apt/sources.list.d/{{ item }}"
+    state: absent
+  loop: "{{ pve_enterprise_sources_to_remove }}"
+
+- name: Create No-Subscription source file
+  copy:
+    dest: /etc/apt/sources.list.d/pve-no-sub.sources
+    content: |
+      Types: deb
+      URIs: http://download.proxmox.com/debian/pve
+      Suites: trixie
+      Components: pve-no-subscription
+      Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+
+- name: Install dependencies
+  apt:
+    update_cache: yes
+    name:
+      - python3-proxmoxer
+      - ifupdown2
+    state: present
+
+- name: Safe Proxmox Upgrade
+  apt:
+    upgrade: dist
+
+# --- UI TWEAKS ---
+- name: Disable "No valid subscription" nag
+  replace:
+    path: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+    regexp: 'res === null \|\| res === undefined \|\| !res \|\| res\.data\.status\.toLowerCase\(\) !== ''active'''
+    replace: 'false'
+  notify: Restart PVEProxy
+
+# --- CONSOLE BANNER ---
+- name: Fix stale IP in login banner
+  copy:
+    dest: /etc/issue
+    content: |
+      Welcome to the Proxmox Virtual Environment.
+      Please use your web browser to configure this server - connect to:
+        https://{{ ansible_host }}:8006/
+
+# --- HOSTNAME ---
+- name: Set hostname
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Update /etc/hosts
+  lineinfile:
+    path: /etc/hosts
+    regexp: '127\.0\.1\.1.*'
+    line: "127.0.1.1 {{ inventory_hostname }}"
+
+# --- LXC TEMPLATES ---
+- name: Update template catalog
+  command: pveam update
+  changed_when: false
+
+- name: Download LXC templates
+  command: pveam download {{ item.storage }} {{ item.template }}
+  args:
+    creates: "/var/lib/vz/template/cache/{{ item.template }}"
+  loop: "{{ pve_lxc_templates }}"
+
+# --- ISO IMAGES ---
+- name: Download ISO images
+  get_url:
+    url: "{{ item.url }}"
+    dest: "{{ item.dest }}"
+    mode: '0644'
+  loop: "{{ pve_iso_images }}"

@@ -1,0 +1,8 @@
+---
+# A reboot is required because udev NIC renames
+# don't take effect on already-active interfaces.
+# All three tasks share this handler so it only runs once.
+- name: Reboot and wait
+  reboot:
+    reboot_timeout: 300
+    msg: "Ansible: applying NIC rename + network config"

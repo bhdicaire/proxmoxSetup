@@ -1,0 +1,12 @@
+---
+network_interfaces:
+  - current_name: "nic0"
+    new_name: "mgmt0"
+    mac: "38:05:25:35:89:06"
+    role: management
+    vlan_id: "30"
+  - current_name: "enp1s0"
+    new_name: "data0"
+    mac: "38:05:25:35:89:07"
+    role: data
+    vlan_id: "30"

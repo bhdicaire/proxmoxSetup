@@ -1,0 +1,29 @@
+auto lo
+iface lo inet loopback
+
+# --- Management Port (5GbE) ---
+# Proxmox SSH and Web GUI
+{% set mgmt = network_interfaces | selectattr('role', 'eq', 'management') | first %}
+iface {{ mgmt.new_name }} inet manual
+
+auto {{ mgmt.new_name }}.{{ mgmt.vlan_id }}
+iface {{ mgmt.new_name }}.{{ mgmt.vlan_id }} inet dhcp
+
+# --- Data Port (10GbE) ---
+# Trunk for all VM/Container traffic
+{% set data = network_interfaces | selectattr('role', 'eq', 'data') | first %}
+iface {{ data.new_name }} inet manual
+
+# VLAN-aware bridge for Virtual Machines
+# VMs pick their VLAN tag in Proxmox VM/CT settings
+auto vmbr0
+iface vmbr0 inet manual
+    bridge-ports {{ data.new_name }}
+    bridge-stp off
+    bridge-fd 0
+    bridge-vlan-aware yes
+    bridge-vids 2-4094
+
+# Host IP on data port (VLAN {{ data.vlan_id }})
+auto vmbr0.{{ data.vlan_id }}
+iface vmbr0.{{ data.vlan_id }} inet dhcp

@@ -1,0 +1,9 @@
+---
+lxc_storage: local-lvm
+lxc_memory: 1024
+lxc_swap: 0
+lxc_cores: 2
+lxc_unprivileged: true
+lxc_ostemplate: "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
+lxc_features: []
+lxc_state: present

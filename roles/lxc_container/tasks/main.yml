@@ -1,0 +1,32 @@
+---
+- name: Create LXC container {{ lxc_hostname }}
+  community.general.proxmox:
+    vmid: "{{ lxc_vmid }}"
+    hostname: "{{ lxc_hostname }}"
+    node: "{{ lxc_node }}"
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    ostemplate: "{{ lxc_ostemplate }}"
+    storage: "{{ lxc_storage }}"
+    disk: "{{ lxc_disk }}"
+    memory: "{{ lxc_memory }}"
+    swap: "{{ lxc_swap }}"
+    cores: "{{ lxc_cores }}"
+    netif: "{{ lxc_netif }}"
+    features: "{{ lxc_features }}"
+    unprivileged: "{{ lxc_unprivileged }}"
+    state: "{{ lxc_state }}"
+  delegate_to: localhost
+
+- name: Start container
+  community.general.proxmox:
+    vmid: "{{ lxc_vmid }}"
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    state: started
+  delegate_to: localhost
+  when: lxc_state == 'present'
