@@ -1,0 +1,12 @@
+---
+- name: Ensure 1Password SSH key is authorized for ops
+  ansible.posix.authorized_key:
+    user: ops
+    state: present
+    key: "{{ lookup('file', ssh_public_key_path) }}"
+
+- name: Proxmox 9.1 Initial Configuration
+  hosts: pve_nodes
+  roles:
+    - role: common
+      tags: common
