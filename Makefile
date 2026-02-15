@@ -1,0 +1,1 @@
+ansible all -i inventory.yml -m ping -u ops --become

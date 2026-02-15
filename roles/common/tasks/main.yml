@@ -1,11 +1,4 @@
 ---
-# --- AUTHENTICATION ---
-- name: Ensure 1Password SSH key is authorized for ops
-  ansible.posix.authorized_key:
-    user: ops
-    state: present
-    key: "{{ lookup('file', ssh_public_key_path) }}"
-
 # --- SYSTEM CONFIG (TIME & NTP) ---
 - name: Set system timezone
   timezone:
@@ -46,6 +39,7 @@
     name:
       - python3-proxmoxer
       - ifupdown2
+      - sudo
     state: present
 
 - name: Safe Proxmox Upgrade

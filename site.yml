@@ -1,7 +1,0 @@
----
-- name: Proxmox 9.1 Initial Configuration
-  hosts: pve_nodes
-  become: true # ← already in ansible.cfg, but leaving it is harmless and makes intent explicit
-  roles:
-    - role: common
-      tags: common
