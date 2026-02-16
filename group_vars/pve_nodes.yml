@@ -9,9 +9,6 @@ dns_servers:
   - 8.8.8.8
 search_domain: "home.lan"
 
-# --- SSH ---
-ssh_public_key_path: "~/.ssh/ops.pub"
-
 # --- Proxmox Repos ---
 pve_enterprise_sources_to_remove:
   - pve-enterprise.sources
@@ -20,17 +17,9 @@ pve_enterprise_sources_to_remove:
 # ── LXC Templates ───────────────────────────────────────────────
 # Resolved dynamically by the template pre-task in playbooks.
 # pveam downloads the latest available template matching this pattern.
-# Override pve_lxc_template_distro or pve_lxc_template_override as needed.
-
 pve_lxc_template_distro: "debian-13-standard"
 
-# Static fallback — only used if pveam lookup fails or is skipped.
-# Update this after running: pveam available --section system | grep debian-13
-pve_lxc_template_override: ""
-
 # ── ISO Images ──────────────────────────────────────────────────
-# Debian major version drives the ISO URL; point release is discovered
-# dynamically by the ISO pre-task. Fallback URL if discovery is skipped.
-
+# Debian major version for ISO discovery; point release resolved by pveam
 pve_iso_debian_major: "13"
 pve_iso_storage_path: "/var/lib/vz/template/iso"

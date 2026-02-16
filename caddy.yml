@@ -1,16 +1,5 @@
 ---
 # caddy.yml — Provision and configure Caddy reverse proxy LXC on PVE01
-#
-# Prerequisites:
-#   - 1Password CLI (op) v2+ signed in on the controller
-#   - community.general collection installed
-#   - Unifi DHCP reservation for caddy on dProxy (VLAN 50)
-#
-# Usage:
-#   ansible-playbook caddy.yml
-#   ansible-playbook caddy.yml --tags template     # Only ensure LXC template
-#   ansible-playbook caddy.yml --tags provision     # Only create the LXC
-#   ansible-playbook caddy.yml --tags configure     # Only configure Caddy
 
 # ── Phase 0: Ensure Trixie LXC template exists ─────────────────
 - name: Ensure Debian 13 LXC template is available
@@ -117,7 +106,6 @@
   vars:
     proxmox_host: "pve01"
     proxmox_api_host: "{{ hostvars['pve01']['ansible_host'] }}"
-    proxmox_api_user: "root@pam"
     lxc_template: >-
       {{ hostvars['pve01']['pve_lxc_template_resolved']
          | default('local:vztmpl/' + pve_lxc_template_distro + '_latest.tar.zst') }}
@@ -126,7 +114,7 @@
     - name: Create Caddy LXC container
       community.general.proxmox:
         api_host: "{{ proxmox_api_host }}"
-        api_user: "{{ proxmox_api_user }}"
+        api_user: "{{ pve_01_api_user }}"
         api_token_id: "{{ pve_01_api_token_id }}"
         api_token_secret: "{{ pve_01_api_token_secret }}"
         node: "{{ proxmox_host }}"
@@ -152,7 +140,7 @@
     - name: Start Caddy LXC container
       community.general.proxmox:
         api_host: "{{ proxmox_api_host }}"
-        api_user: "{{ proxmox_api_user }}"
+        api_user: "{{ pve_01_api_user }}"
         api_token_id: "{{ pve_01_api_token_id }}"
         api_token_secret: "{{ pve_01_api_token_secret }}"
         node: "{{ proxmox_host }}"
