@@ -1,0 +1,118 @@
+---
+# ensure-template.yml — Ensure a Debian LXC template exists on a PVE node
+#
+# Shared pre-task imported by service playbooks before provisioning.
+# Tries three strategies in order:
+#   1. Use an existing template from cache
+#   2. Download via pveam
+#   3. Build from source with dab
+#
+# Required variables (from group_vars/pve_nodes.yml):
+#   - pve_lxc_template_distro  (e.g. "debian-13-standard")
+#
+# Outputs:
+#   - pve_lxc_template_resolved  (fact set on the target PVE node)
+#
+# Usage in service playbooks:
+#   - import_playbook: ensure-template.yml
+#
+#   Then reference the resolved template in provisioning tasks:
+#     {{ hostvars['pve-01']['pve_lxc_template_resolved'] }}
+
+- name: Ensure Debian LXC template is available
+  hosts: pve_nodes
+  become: true
+  gather_facts: false
+  tags: [template, provision]
+
+  vars:
+    template_cache_dir: "/var/lib/vz/template/cache"
+    dab_work_dir: "/root/dab/{{ pve_lxc_template_distro }}"
+    dab_git_base: "https://git.proxmox.com/?p=dab-pve-appliances.git;a=blob_plain;hb=HEAD;f=debian-13-trixie-std-64"
+
+  tasks:
+    # ── Strategy 1: Check cache ─────────────────────────────────
+    - name: Check if template already exists in cache
+      ansible.builtin.find:
+        paths: "{{ template_cache_dir }}"
+        patterns: "{{ pve_lxc_template_distro }}_*.tar.*"
+      register: cached_templates
+
+    # ── Strategy 2: Download via pveam ──────────────────────────
+    - name: Try to download template via pveam
+      when: cached_templates.matched == 0
+      block:
+        - name: Update pveam template index
+          ansible.builtin.command: pveam update
+          changed_when: true
+
+        - name: Find latest available template
+          ansible.builtin.shell: >
+            pveam available --section system
+            | grep '{{ pve_lxc_template_distro }}'
+            | tail -1
+            | awk '{print $2}'
+          register: pveam_template
+          changed_when: false
+
+        - name: Download template via pveam
+          ansible.builtin.command: >
+            pveam download local {{ pveam_template.stdout }}
+          when: pveam_template.stdout | length > 0
+          register: pveam_download
+          changed_when: pveam_download.rc == 0
+
+    # ── Strategy 3: Build with dab ──────────────────────────────
+    - name: Fall back to building template with dab
+      when:
+        - cached_templates.matched == 0
+        - pveam_download is not defined or pveam_download is skipped or pveam_download is failed
+      block:
+        - name: Install dab
+          ansible.builtin.apt:
+            name: dab
+            state: present
+            update_cache: true
+
+        - name: Create dab working directory
+          ansible.builtin.file:
+            path: "{{ dab_work_dir }}"
+            state: directory
+            mode: "0755"
+
+        - name: Download dab.conf
+          ansible.builtin.get_url:
+            url: "{{ dab_git_base }}/dab.conf"
+            dest: "{{ dab_work_dir }}/dab.conf"
+            mode: "0644"
+
+        - name: Download Makefile
+          ansible.builtin.get_url:
+            url: "{{ dab_git_base }}/Makefile"
+            dest: "{{ dab_work_dir }}/Makefile"
+            mode: "0644"
+
+        - name: Build template (takes a few minutes)
+          ansible.builtin.command:
+            cmd: make
+            chdir: "{{ dab_work_dir }}"
+          register: dab_build
+          changed_when: dab_build.rc == 0
+
+        - name: Copy built template to cache
+          ansible.builtin.shell: >
+            cp {{ dab_work_dir }}/{{ pve_lxc_template_distro }}_*.tar.*
+            {{ template_cache_dir }}/
+          changed_when: true
+
+    # ── Resolve final template path ─────────────────────────────
+    - name: Detect template filename in cache
+      ansible.builtin.find:
+        paths: "{{ template_cache_dir }}"
+        patterns: "{{ pve_lxc_template_distro }}_*.tar.*"
+      register: final_template
+
+    - name: Set template fact for provisioning
+      ansible.builtin.set_fact:
+        pve_lxc_template_resolved: "local:vztmpl/{{ final_template.files[0].path | basename }}"
+      when: final_template.matched > 0

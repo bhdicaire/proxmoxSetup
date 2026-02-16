@@ -1,20 +1,16 @@
 ---
-# --- LXC Container ---
-lxc_vmid: 110
-lxc_hostname: albert
-lxc_node: pve-01
-lxc_disk: 8
-lxc_mac: "02:00:00:00:01:10"
-lxc_vlan_id: "30"
-lxc_netif: '{"net0":"name=eth0,bridge=vmbr0,tag={{ lxc_vlan_id }},hwaddr={{ lxc_mac }},ip=dhcp"}'
-lxc_features:
-  - mount=nfs
+# Albert SMB/NFS server — dServices VLAN 30
+# VMID: 110 on PVE-01
+# IP assigned via Unifi DHCP host reservation
 
-# --- NFS ---
+albert_nameserver: "172.30.30.1"
+albert_search_domain: "lab.local"
+
+# ── NFS mount from uNAS ────────────────────────────────────────
 nfs_server: "172.30.30.17"
 nfs_share: "/var/nfs/shared/albert/mnt"
 
-# --- Samba Shares ---
+# ── Samba shares ────────────────────────────────────────────────
 samba_shares:
   - name: media
     path: "/mnt/nas/media"

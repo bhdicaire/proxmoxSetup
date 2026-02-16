@@ -1,14 +1,88 @@
 ---
-# Phase 1: Create the container (runs against Proxmox host)
-- name: Provision SMB server container
-  hosts: pve_nodes
-  become: true          # ← needs sudo to interact with Proxmox
-  roles:
-    - lxc_container
+# smbserver.yml — Provision and configure Albert SMB/NFS server LXC on PVE-01
+#
+# Prerequisites:
+#   - 1Password CLI (op) v2+ signed in on the controller
+#   - community.general collection installed
+#   - Unifi DHCP reservation for albert on dServices (VLAN 30)
+#
+# Usage:
+#   ansible-playbook smbserver.yml
+#   ansible-playbook smbserver.yml --tags template     # Only ensure LXC template
+#   ansible-playbook smbserver.yml --tags provision     # Only create the LXC
+#   ansible-playbook smbserver.yml --tags configure     # Only configure Samba/NFS
 
-# Phase 2: Configure the container (runs inside it)
-- name: Configure SMB server
+# ── Phase 0: Ensure Trixie LXC template exists ─────────────────
+- import_playbook: roles/common/tasks/ensureTemplate.yml
+
+# ── Phase 1: Provision LXC container ───────────────────────────
+- name: Provision Albert SMB server LXC on Proxmox
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [provision]
+
+  vars:
+    proxmox_host: "pve-01"
+    proxmox_api_host: "{{ hostvars['pve-01']['ansible_host'] }}"
+    lxc_template: >-
+      {{ hostvars['pve-01']['pve_lxc_template_resolved']
+         | default('local:vztmpl/' + pve_lxc_template_distro + '_latest.tar.zst') }}
+
+  tasks:
+    - name: Create Albert LXC container
+      community.general.proxmox:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ pve_01_api_user }}"
+        api_token_id: "{{ pve_01_api_token_id }}"
+        api_token_secret: "{{ pve_01_api_token_secret }}"
+        node: "{{ proxmox_host }}"
+        hostname: "albert"
+        vmid: 110
+        ostemplate: "{{ lxc_template }}"
+        storage: "local-lvm"
+        disk: "8"
+        cores: 2
+        memory: 1024
+        swap: 0
+        nameserver: "{{ hostvars['albert']['albert_nameserver'] | default('172.30.30.1') }}"
+        searchdomain: "{{ hostvars['albert']['albert_search_domain'] | default('lab.local') }}"
+        netif: '{"net0":"name=eth0,bridge=vmbr0,tag=50,ip=dhcp,firewall=1"}'
+        pubkey: "{{ ops_ssh_public_key }}"
+        onboot: true
+        unprivileged: true
+        features:
+          - nesting=1
+          - mount=nfs
+        state: present
+
+    - name: Start Albert LXC container
+      community.general.proxmox:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ pve_01_api_user }}"
+        api_token_id: "{{ pve_01_api_token_id }}"
+        api_token_secret: "{{ pve_01_api_token_secret }}"
+        node: "{{ proxmox_host }}"
+        vmid: 110
+        state: started
+
+    - name: Wait for container to get DHCP lease and become reachable
+      ansible.builtin.wait_for:
+        host: "{{ hostvars['albert']['ansible_host'] }}"
+        port: 22
+        delay: 10
+        timeout: 90
+
+# ── Phase 2: Configure Samba/NFS ───────────────────────────────
+- name: Configure Albert SMB/NFS server
   hosts: albert
-  become: true          # ← needs sudo inside the container
+  become: true
+  gather_facts: true
+  tags: [configure]
+
+  vars:
+    samba_users: "{{ albert_samba_users }}"
+
   roles:
-    - samba_nfs
+    - role: common
+    - role: samba_nfs
