@@ -1,10 +1,34 @@
-# Proxmox LXC Config
-caddy_lxc_id: 101
-caddy_lxc_ip: "192.168.1.50/24"
-caddy_lxc_gw: "192.168.1.1"
-caddy_lxc_bridge: "vmbr0"
+---
+# ops user configuration
+caddy_ops_user: "ops"
+caddy_ops_uid: "1000"
+caddy_ops_shell: "/bin/bash"
 
-# Caddy Config
-caddy_domain: "books.yourdomain.com"
-calibre_web_internal_ip: "192.168.1.200" # The IP of your Calibre VM
-calibre_web_port: 8083
+# Caddy service user (runs the daemon)
+caddy_user: "caddy"
+caddy_group: "caddy"
+
+# Install method: 'repo' (official Debian/Ubuntu apt repo)
+caddy_install_method: "repo"
+
+# Caddy configuration paths
+caddy_config_dir: "/etc/caddy"
+caddy_data_dir: "/var/lib/caddy"
+caddy_log_dir: "/var/log/caddy"
+
+# Global Caddyfile options
+caddy_email: ""
+caddy_global_options: {}
+
+# Default site list (override in host_vars)
+caddy_sites: []
+
+# NAS mounts (override in host_vars)
+caddy_nas_mounts: []
+
+# Caddy admin API — disabled by default for security
+caddy_admin_api: "off"
+
+# 1Password references
+onepassword_vault: "Homelab"
+onepassword_ssh_key_item: "Homelab SSH Key"

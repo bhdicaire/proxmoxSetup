@@ -1,0 +1,15 @@
+{
+    acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+}
+
+{% for service in proxied_services %}
+{{ service.subdomain }}.{{ base_domain }} {
+    reverse_proxy {{ service.proto | default('http') }}://{{ service.ip }}:{{ service.port }} {
+        {% if service.proto == 'https' %}
+        transport http {
+            tls_insecure_skip_verify
+        }
+        {% endif %}
+    }
+}
+{% endfor %}

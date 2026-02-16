@@ -19,8 +19,7 @@ pve_enterprise_sources_to_remove:
 
 # --- LXC Templates (via pveam) ---
 pve_lxc_templates:
-  - storage: local
-    template: debian-12-standard_12.12-1_amd64.tar.zst
+    template: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst"
 
 # --- ISO Images (for VMs) ---
 pve_iso_images:

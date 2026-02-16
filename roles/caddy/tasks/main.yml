@@ -1,40 +1,110 @@
+---
+# ── ops user setup ──────────────────────────────────────────────
 
-# Caddy (LXC): Receives traffic on port 80/443. It's the only container you need to port-forward from your router.
-- name: Create Caddy LXC on Proxmox
-  community.proxmox.proxmox:
-    api_host: "{{ pve_api_host }}"
-    api_user: "{{ pve_api_user }}"
-    api_password: "{{ pve_api_password }}"
-    node: "{{ pve_node }}"
-    vmid: 101
-    hostname: "caddy-gateway"
-    ostemplate: "local:vztmpl/debian-13-standard_amd64.tar.zst"
-    net0: "name=eth0,bridge=vmbr0,ip=192.168.1.50/24,gw=192.168.1.1"
-    state: started
-  delegate_to: localhost
+- name: Create ops user
+  ansible.builtin.user:
+    name: "{{ caddy_ops_user }}"
+    uid: "{{ caddy_ops_uid }}"
+    shell: "{{ caddy_ops_shell }}"
+    groups: ["sudo"]
+    append: true
+    create_home: true
+    state: present
 
-- name: Download Caddy with Cloudflare Plugin
-  get_url:
-    url: "https://caddyserver.com/api/download?os=linux&arch=amd64&p=github.com/caddy-dns/cloudflare"
-    dest: /usr/bin/caddy
-    mode: '0755'
+- name: Set up SSH authorized key for ops
+  ansible.posix.authorized_key:
+    user: "{{ caddy_ops_user }}"
+    key: "{{ ops_ssh_public_key }}"
+    state: present
+    exclusive: false
 
-- name: Ensure Caddy systemd override exists
-  file:
-    path: /etc/systemd/system/caddy.service.d
+- name: Allow ops passwordless sudo
+  ansible.builtin.copy:
+    content: "{{ caddy_ops_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/{{ caddy_ops_user }}"
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+- name: Harden SSH — disable root login and password auth
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+  notify: Restart SSH
+
+# ── Caddy installation ──────────────────────────────────────────
+
+- name: Install prerequisites
+  ansible.builtin.apt:
+    name:
+      - debian-keyring
+      - debian-archive-keyring
+      - apt-transport-https
+      - curl
+      - sudo
+      - nfs-common
+    state: present
+    update_cache: true
+
+- name: Add Caddy GPG key
+  ansible.builtin.shell: |
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | \
+      gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  args:
+    creates: /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  when: caddy_install_method == "repo"
+
+- name: Add Caddy apt repository
+  ansible.builtin.shell: |
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | \
+      tee /etc/apt/sources.list.d/caddy-stable.list
+  args:
+    creates: /etc/apt/sources.list.d/caddy-stable.list
+  when: caddy_install_method == "repo"
+
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+  when: caddy_install_method == "repo"
+
+# ── Caddy configuration ────────────────────────────────────────
+
+- name: Create log directory
+  ansible.builtin.file:
+    path: "{{ caddy_log_dir }}"
     state: directory
+    owner: "{{ caddy_user }}"
+    group: "{{ caddy_group }}"
+    mode: "0750"
 
-- name: Set Cloudflare Token in Environment
-  copy:
-    dest: /etc/systemd/system/caddy.service.d/override.conf
-    content: |
-      [Service]
-      Environment="CLOUDFLARE_API_TOKEN={{ cloudflare_token }}"
-  notify: Reload Caddy
+- name: Configure NAS mounts
+  ansible.posix.mount:
+    src: "{{ item.src }}"
+    path: "{{ item.dest }}"
+    fstype: "{{ item.fstype | default('nfs') }}"
+    opts: "{{ item.opts | default('ro,soft,timeo=5') }}"
+    state: mounted
+  loop: "{{ caddy_nas_mounts }}"
+  when: caddy_nas_mounts | length > 0
 
-- name: Deploy Dynamic Caddyfile
-  template:
+- name: Deploy Caddyfile
+  ansible.builtin.template:
     src: Caddyfile.j2
-    dest: /etc/caddy/Caddyfile
+    dest: "{{ caddy_config_dir }}/Caddyfile"
+    owner: root
+    group: "{{ caddy_group }}"
+    mode: "0644"
+    validate: "caddy validate --config %s --adapter caddyfile"
   notify: Reload Caddy
 
+- name: Ensure Caddy is enabled and running
+  ansible.builtin.systemd:
+    name: caddy
+    enabled: true
+    state: started

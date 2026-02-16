@@ -26,6 +26,3 @@ plex_bridge: "vmbr0"
 plex_nfs_server: "172.30.30.17"
 plex_nfs_export: "/var/nfs/shared/plex"
 plex_nfs_mountpoint: "/mnt/media"
-
-# 1Password — refresh claim token at https://plex.tv/claim before running!
-plex_claim_token: "{{ lookup('community.general.onepassword', 'Plex', field='claimToken') }}"

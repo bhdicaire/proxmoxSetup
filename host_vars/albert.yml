@@ -24,12 +24,3 @@ samba_shares:
     path: "/mnt/nas/coucou"
     guest_ok: "yes"
     read_only: "yes"
-
-# --- Samba Users ---
-samba_users:
-  - name: "{{ lookup('community.general.onepassword', 'PVE02', field='userName1', section='Albert') }}"
-    password: "{{ lookup('community.general.onepassword', 'PVE02', field='password1', section='Albert') }}"
-  - name: "{{ lookup('community.general.onepassword', 'PVE02', field='userName2', section='Albert') }}"
-    password: "{{ lookup('community.general.onepassword', 'PVE02', field='password2', section='Albert') }}"
-  - name: "{{ lookup('community.general.onepassword', 'PVE02', field='userName3', section='Albert') }}"
-    password: "{{ lookup('community.general.onepassword', 'PVE02', field='password3', section='Albert') }}"
