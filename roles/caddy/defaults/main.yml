@@ -1,14 +1,9 @@
 ---
-# ops user configuration
-caddy_ops_user: "ops"
-caddy_ops_uid: "1000"
-caddy_ops_shell: "/bin/bash"
-
 # Caddy service user (runs the daemon)
 caddy_user: "caddy"
 caddy_group: "caddy"
 
-# Install method: 'repo' (official Debian/Ubuntu apt repo)
+# Install method
 caddy_install_method: "repo"
 
 # Caddy configuration paths
@@ -26,9 +21,5 @@ caddy_sites: []
 # NAS mounts (override in host_vars)
 caddy_nas_mounts: []
 
-# Caddy admin API — disabled by default for security
+# Caddy admin API — disabled by default
 caddy_admin_api: "off"
-
-# 1Password references
-onepassword_vault: "Homelab"
-onepassword_ssh_key_item: "Homelab SSH Key"

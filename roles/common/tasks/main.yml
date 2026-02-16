@@ -107,3 +107,48 @@
     dest: "{{ item.dest }}"
     mode: '0644'
   loop: "{{ pve_iso_images }}"
+
+# ── ops user setup ──────────────────────────────────────────────
+
+- name: Install sudo
+  ansible.builtin.apt:
+    name: sudo
+    state: present
+    update_cache: true
+
+- name: Create ops user
+  ansible.builtin.user:
+    name: "{{ common_ops_user }}"
+    uid: "{{ common_ops_uid }}"
+    shell: "{{ common_ops_shell }}"
+    groups: ["sudo"]
+    append: true
+    create_home: true
+    state: present
+
+- name: Set up SSH authorized key for ops
+  ansible.posix.authorized_key:
+    user: "{{ common_ops_user }}"
+    key: "{{ ops_ssh_public_key }}"
+    state: present
+    exclusive: false
+
+- name: Allow ops passwordless sudo
+  ansible.builtin.copy:
+    content: "{{ common_ops_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/{{ common_ops_user }}"
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+# ── SSH hardening ───────────────────────────────────────────────
+
+- name: Harden SSH — disable root login and password auth
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+  notify: Restart SSH

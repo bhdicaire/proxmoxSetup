@@ -1,31 +1,28 @@
 ---
-# Caddy LXC — VLAN 50 (reverse proxy)
+# Caddy LXC — dProxy VLAN 50
 # VMID: 150 on PVE01
 # IP assigned via Unifi DHCP host reservation
 
-caddy_nameserver: "172.50.0.1"
+caddy_nameserver: "172.30.50.1"
 caddy_search_domain: "lab.local"
-
-# Fallback template name if dab pre-task is skipped
-caddy_lxc_template: "local:vztmpl/debian-13-standard_13.0-1_amd64.tar.zst"
 
 # Upstream services Caddy will proxy to
 caddy_sites:
   - domain: "proxmox.lab.local"
-    upstream: "https://10.30.0.1:8006"
+    upstream: "https://172.30.30.1:8006"
     tls_internal: true
 
   - domain: "nas.lab.local"
-    upstream: "http://10.20.0.10:5000"
+    upstream: "http://172.30.20.10:5000"
     tls_internal: true
 
   # - domain: "splunk.lab.local"
-  #   upstream: "https://10.30.0.20:8000"
+  #   upstream: "https://172.30.30.20:8000"
   #   tls_internal: true
 
-# Optional: NFS mount from uNAS for static file serving
+# Optional: NFS mount from uNAS on dStorage (VLAN 20)
 caddy_nas_mounts: []
-  # - src: "10.20.0.10:/volume1/web"
+  # - src: "172.30.20.10:/volume1/web"
   #   dest: "/srv/www"
   #   fstype: "nfs"
   #   opts: "ro,soft,timeo=5"

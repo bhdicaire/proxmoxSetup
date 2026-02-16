@@ -4,35 +4,60 @@
 # Prerequisites:
 #   - 1Password CLI (op) v2+ signed in on the controller
 #   - community.general collection installed
-#   - Unifi DHCP reservation for caddy (MAC will be assigned at first boot)
+#   - Unifi DHCP reservation for caddy on dProxy (VLAN 50)
 #
 # Usage:
 #   ansible-playbook caddy.yml
-#   ansible-playbook caddy.yml --tags template     # Only build the LXC template
+#   ansible-playbook caddy.yml --tags template     # Only ensure LXC template
 #   ansible-playbook caddy.yml --tags provision     # Only create the LXC
 #   ansible-playbook caddy.yml --tags configure     # Only configure Caddy
 
 # ── Phase 0: Ensure Trixie LXC template exists ─────────────────
-- name: Build Debian 13 Trixie LXC template if missing
+- name: Ensure Debian 13 LXC template is available
   hosts: pve01
   become: true
   gather_facts: false
   tags: [template, provision]
 
   vars:
-    dab_work_dir: "/root/dab/debian-13-standard"
-    dab_git_base: "https://git.proxmox.com/?p=dab-pve-appliances.git;a=blob_plain;hb=HEAD;f=debian-13-trixie-std-64"
     template_cache_dir: "/var/lib/vz/template/cache"
+    dab_work_dir: "/root/dab/{{ pve_lxc_template_distro }}"
+    dab_git_base: "https://git.proxmox.com/?p=dab-pve-appliances.git;a=blob_plain;hb=HEAD;f=debian-13-trixie-std-64"
 
   tasks:
-    - name: Check if Trixie template already exists
+    - name: Check if a Trixie template already exists in cache
       ansible.builtin.find:
         paths: "{{ template_cache_dir }}"
-        patterns: "debian-13-standard_*.tar.*"
-      register: trixie_template
+        patterns: "{{ pve_lxc_template_distro }}_*.tar.*"
+      register: cached_templates
 
-    - name: Build Trixie template with dab
-      when: trixie_template.matched == 0
+    - name: Try to download template via pveam
+      when: cached_templates.matched == 0
+      block:
+        - name: Update pveam template index
+          ansible.builtin.command: pveam update
+          changed_when: true
+
+        - name: Find latest available template
+          ansible.builtin.shell: >
+            pveam available --section system
+            | grep '{{ pve_lxc_template_distro }}'
+            | tail -1
+            | awk '{print $2}'
+          register: pveam_template
+          changed_when: false
+
+        - name: Download template via pveam
+          ansible.builtin.command: >
+            pveam download local {{ pveam_template.stdout }}
+          when: pveam_template.stdout | length > 0
+          register: pveam_download
+          changed_when: pveam_download.rc == 0
+
+    - name: Fall back to building template with dab
+      when:
+        - cached_templates.matched == 0
+        - pveam_download is not defined or pveam_download is skipped or pveam_download is failed
       block:
         - name: Install dab
           ansible.builtin.apt:
@@ -58,32 +83,29 @@
             dest: "{{ dab_work_dir }}/Makefile"
             mode: "0644"
 
-        - name: Build template (this takes a few minutes)
+        - name: Build template (takes a few minutes)
           ansible.builtin.command:
             cmd: make
             chdir: "{{ dab_work_dir }}"
           register: dab_build
           changed_when: dab_build.rc == 0
 
-        - name: Copy template to cache
-          ansible.builtin.copy:
-            src: "{{ item.path }}"
-            dest: "{{ template_cache_dir }}/"
-            remote_src: true
-            mode: "0644"
-          with_fileglob:
-            - "{{ dab_work_dir }}/debian-13-standard_*.tar.*"
+        - name: Copy built template to cache
+          ansible.builtin.shell: >
+            cp {{ dab_work_dir }}/{{ pve_lxc_template_distro }}_*.tar.*
+            {{ template_cache_dir }}/
+          changed_when: true
 
-    - name: Detect template filename
+    - name: Detect template filename in cache
       ansible.builtin.find:
         paths: "{{ template_cache_dir }}"
-        patterns: "debian-13-standard_*.tar.*"
-      register: trixie_template_final
+        patterns: "{{ pve_lxc_template_distro }}_*.tar.*"
+      register: final_template
 
     - name: Set template fact for provisioning
       ansible.builtin.set_fact:
-        caddy_lxc_template_resolved: "local:vztmpl/{{ trixie_template_final.files[0].path | basename }}"
-      when: trixie_template_final.matched > 0
+        pve_lxc_template_resolved: "local:vztmpl/{{ final_template.files[0].path | basename }}"
+      when: final_template.matched > 0
 
 # ── Phase 1: Provision LXC container ───────────────────────────
 - name: Provision Caddy LXC container on Proxmox
@@ -96,22 +118,21 @@
     proxmox_host: "pve01"
     proxmox_api_host: "{{ hostvars['pve01']['ansible_host'] }}"
     proxmox_api_user: "root@pam"
-    # Template: use detected name from dab build, or fall back to host_vars default
-    caddy_lxc_template_actual: >-
-      {{ hostvars['pve01']['caddy_lxc_template_resolved']
-         | default(caddy_lxc_template) }}
+    lxc_template: >-
+      {{ hostvars['pve01']['pve_lxc_template_resolved']
+         | default('local:vztmpl/' + pve_lxc_template_distro + '_latest.tar.zst') }}
 
   tasks:
     - name: Create Caddy LXC container
       community.general.proxmox:
         api_host: "{{ proxmox_api_host }}"
         api_user: "{{ proxmox_api_user }}"
-        api_token_id: "{{ proxmox_api_token_id }}"
-        api_token_secret: "{{ proxmox_api_token_secret }}"
+        api_token_id: "{{ pve_01_api_token_id }}"
+        api_token_secret: "{{ pve_01_api_token_secret }}"
         node: "{{ proxmox_host }}"
         hostname: "caddy"
         vmid: 150
-        ostemplate: "{{ caddy_lxc_template_actual }}"
+        ostemplate: "{{ lxc_template }}"
         storage: "local-lvm"
         disk: "4"
         cores: 1
@@ -132,8 +153,8 @@
       community.general.proxmox:
         api_host: "{{ proxmox_api_host }}"
         api_user: "{{ proxmox_api_user }}"
-        api_token_id: "{{ proxmox_api_token_id }}"
-        api_token_secret: "{{ proxmox_api_token_secret }}"
+        api_token_id: "{{ pve_01_api_token_id }}"
+        api_token_secret: "{{ pve_01_api_token_secret }}"
         node: "{{ proxmox_host }}"
         vmid: 150
         state: started
@@ -153,4 +174,5 @@
   tags: [configure]
 
   roles:
+    - role: common
     - role: caddy

@@ -9,3 +9,7 @@ network_interfaces: []
 # Post-reboot connection settings
 network_flip_delay: 10
 network_flip_timeout: 300
+
+common_ops_user: "ops"
+common_ops_uid: "1000"
+common_ops_shell: "/bin/bash"

@@ -1,41 +1,4 @@
 ---
-# ── ops user setup ──────────────────────────────────────────────
-
-- name: Create ops user
-  ansible.builtin.user:
-    name: "{{ caddy_ops_user }}"
-    uid: "{{ caddy_ops_uid }}"
-    shell: "{{ caddy_ops_shell }}"
-    groups: ["sudo"]
-    append: true
-    create_home: true
-    state: present
-
-- name: Set up SSH authorized key for ops
-  ansible.posix.authorized_key:
-    user: "{{ caddy_ops_user }}"
-    key: "{{ ops_ssh_public_key }}"
-    state: present
-    exclusive: false
-
-- name: Allow ops passwordless sudo
-  ansible.builtin.copy:
-    content: "{{ caddy_ops_user }} ALL=(ALL) NOPASSWD:ALL\n"
-    dest: "/etc/sudoers.d/{{ caddy_ops_user }}"
-    mode: "0440"
-    validate: "visudo -cf %s"
-
-- name: Harden SSH — disable root login and password auth
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: "{{ item.regexp }}"
-    line: "{{ item.line }}"
-    state: present
-  loop:
-    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
-    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
-  notify: Restart SSH
-
 # ── Caddy installation ──────────────────────────────────────────
 
 - name: Install prerequisites
@@ -45,7 +8,6 @@
       - debian-archive-keyring
       - apt-transport-https
       - curl
-      - sudo
       - nfs-common
     state: present
     update_cache: true
