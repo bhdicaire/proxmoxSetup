@@ -1,0 +1,5 @@
+---
+# Sensible defaults — override in host_vars as needed
+plex_swap: 512
+plex_bridge: "vmbr0"
+plex_nfs_mountpoint: "/mnt/media"

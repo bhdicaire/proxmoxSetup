@@ -1,0 +1,31 @@
+---
+# NIC MAC addresses (from: sudo lspci -nn + ip link show)
+# Intel I226-V  2.5GbE → management
+network_mgmt_mac: "38:05:25:37:22:b2"
+# Realtek RTL8127 10GbE → production
+network_prod_mac: "38:05:25:37:22:b3"
+
+# Management IP — must match your Unifi DHCP reservation for MAC :b2 on VLAN 30
+network_mgmt_ip: "172.30.30.11"
+
+# ── Plex LXC container ───────────────────────────────────────────
+plex_vmid: 100
+plex_hostname: "plex"
+plex_cores: 4          # Drop to 2 after initial library scan
+plex_memory: 8192      # Drop to 4096 after initial library scan
+plex_swap: 512
+plex_disk: "32"
+plex_storage: "local-zfs"
+plex_template: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst"
+
+# Network
+plex_vlan: 30
+plex_bridge: "vmbr0"
+
+# NFS media mount (read-only)
+plex_nfs_server: "172.30.30.17"
+plex_nfs_export: "/var/nfs/shared/plex"
+plex_nfs_mountpoint: "/mnt/media"
+
+# 1Password — refresh claim token at https://plex.tv/claim before running!
+plex_claim_token: "{{ lookup('community.general.onepassword', 'Plex', field='claimToken') }}"

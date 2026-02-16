@@ -1,0 +1,191 @@
+---
+# ══════════════════════════════════════════════════════════════════
+# Phase 1: Create LXC container with GPU passthrough (runs on pve-01)
+# ══════════════════════════════════════════════════════════════════
+- name: "Phase 1 — Create Plex LXC container"
+  hosts: pve_nodes
+  gather_facts: false
+  tasks:
+    # ── Preflight: verify Intel GPU is available on the host ──────
+    - name: Check /dev/dri/renderD128 exists on host
+      ansible.builtin.stat:
+        path: /dev/dri/renderD128
+      register: render_device
+
+    - name: Fail if Intel GPU not available
+      ansible.builtin.fail:
+        msg: >
+          /dev/dri/renderD128 not found on {{ inventory_hostname }}.
+          Verify Intel iGPU is enabled in BIOS and i915 driver is loaded.
+      when: not render_device.stat.exists
+
+    # ── Download Debian template if missing ───────────────────────
+    - name: List available templates
+      ansible.builtin.command: pveam list local
+      register: template_list
+      changed_when: false
+
+    - name: Download Debian 13 template
+      ansible.builtin.command: >
+        pveam download local debian-13-standard_13.1-2_amd64.tar.zst
+      when: "'debian-13-standard_13.1-2' not in template_list.stdout"
+
+    # ── Set GPU permissions on host for unprivileged access ───────
+    - name: Deploy udev rule for GPU render node permissions
+      ansible.builtin.copy:
+        dest: /etc/udev/rules.d/99-gpu-lxc.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by Ansible — allow unprivileged LXC access to Intel GPU
+          SUBSYSTEM=="drm", KERNEL=="renderD128", GROUP="render", MODE="0666"
+      register: udev_rule
+
+    - name: Reload udev rules
+      ansible.builtin.command: udevadm control --reload-rules
+      when: udev_rule.changed
+
+    - name: Trigger udev rules
+      ansible.builtin.command: udevadm trigger
+      when: udev_rule.changed
+    # ── Create the container ──────────────────────────────────────
+    - name: Check if container already exists
+      ansible.builtin.command: "pct status {{ plex_vmid }}"
+      register: pct_status
+      failed_when: false
+      changed_when: false
+
+    - name: Create Plex LXC container
+      ansible.builtin.command: >
+        pct create {{ plex_vmid }} {{ plex_template }}
+        --hostname {{ plex_hostname }}
+        --cores {{ plex_cores }}
+        --memory {{ plex_memory }}
+        --swap {{ plex_swap }}
+        --rootfs {{ plex_storage }}:{{ plex_disk }}
+        --net0 name=eth0,bridge={{ plex_bridge }},tag={{ plex_vlan }},ip=dhcp,firewall=1
+        --ostype debian
+        --unprivileged 1
+        --features nesting=1
+        --onboot 1
+        --start 0
+      when: pct_status.rc != 0
+
+    # ── Configure GPU passthrough in container config ─────────────
+    - name: Add GPU passthrough to container config
+      ansible.builtin.blockinfile:
+        path: "/etc/pve/lxc/{{ plex_vmid }}.conf"
+        marker: "# {mark} ANSIBLE GPU PASSTHROUGH"
+        block: |
+          lxc.cgroup2.devices.allow: c 226:0 rwm
+          lxc.cgroup2.devices.allow: c 226:128 rwm
+          lxc.mount.entry: /dev/dri/card0 dev/dri/card0 none bind,optional,create=file 0 0
+          lxc.mount.entry: /dev/dri/renderD128 dev/dri/renderD128 none bind,optional,create=file 0 0
+
+    # Proxmox mounts /mnt read-only, use /srv instead 
+    - name: Check if NFS already mounted
+      ansible.builtin.command: findmnt /srv/plex-media
+      register: nfs_mounted
+      failed_when: false
+      changed_when: false
+
+    - name: Create host-side NFS mountpoint
+      ansible.builtin.file:
+        path: /srv/plex-media
+        state: directory
+        mode: "0755"
+      when: nfs_mounted.rc != 0
+
+    - name: Mount NFS on host
+      ansible.posix.mount:
+        path: /srv/plex-media
+        src: "{{ plex_nfs_server }}:{{ plex_nfs_export }}"
+        fstype: nfs
+        opts: "ro,soft,nfsvers=3,timeo=150,retrans=3"
+        state: mounted
+      when: nfs_mounted.rc != 0
+
+    - name: Add bind-mount to container config
+      ansible.builtin.lineinfile:
+        path: "/etc/pve/lxc/{{ plex_vmid }}.conf"
+        line: "mp0: /srv/plex-media,mp=/mnt/media,ro=1"
+        regexp: "^mp0:"
+        state: present
+
+    # ── Start the container ───────────────────────────────────────
+    - name: Start Plex container
+      ansible.builtin.command: "pct start {{ plex_vmid }}"
+      register: pct_start
+      failed_when: pct_start.rc != 0 and 'already running' not in pct_start.stderr
+      changed_when: "'already running' not in pct_start.stderr"
+
+    - name: Wait for container to be ready
+      ansible.builtin.pause:
+        seconds: 10
+
+# ══════════════════════════════════════════════════════════════════
+# Phase 2: Bootstrap ops user via pct exec (runs on pve-01)
+# ══════════════════════════════════════════════════════════════════
+- name: "Phase 2 — Bootstrap ops user in Plex container"
+  hosts: pve_nodes
+  gather_facts: false
+  tasks:
+    - name: Check if ops user already exists
+      ansible.builtin.command: "pct exec {{ plex_vmid }} -- id ops"
+      register: ops_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create ops user with sudo
+      ansible.builtin.shell: |
+        pct exec {{ plex_vmid }} -- bash -c '
+          apt-get update -qq
+          apt-get install -y -qq sudo openssh-server > /dev/null
+          useradd -m -s /bin/bash -G sudo ops
+          echo "ops ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ops
+          chmod 0440 /etc/sudoers.d/ops
+          mkdir -p /home/ops/.ssh
+          echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINYdujeQ7GagYv1XVL8bT2qFqoQQVv1xjb8DDVCd4VvT" > /home/ops/.ssh/authorized_keys
+          chmod 700 /home/ops/.ssh
+          chmod 600 /home/ops/.ssh/authorized_keys
+          chown -R ops:ops /home/ops/.ssh
+          systemctl enable --now ssh
+        '
+      when: ops_check.rc != 0
+
+    # ── Get container IP for Phase 3 ─────────────────────────────
+    - name: Wait for DHCP lease
+      ansible.builtin.shell: |
+        for i in $(seq 1 30); do
+          IP=$(pct exec {{ plex_vmid }} -- ip -4 addr show eth0 2>/dev/null | grep -oP 'inet \K[\d.]+')
+          if [ -n "$IP" ]; then
+            echo "$IP"
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      register: container_ip
+      changed_when: false
+
+    - name: Display Plex container IP
+      ansible.builtin.debug:
+        msg: "Plex container IP: {{ container_ip.stdout | trim }}"
+
+    - name: Add Plex host to in-memory inventory
+      ansible.builtin.add_host:
+        name: plex
+        ansible_host: "{{ container_ip.stdout | trim }}"
+        ansible_user: ops
+        groups: plex_servers
+
+# ══════════════════════════════════════════════════════════════════
+# Phase 3: Configure Plex (connects to container via SSH as ops)
+# ══════════════════════════════════════════════════════════════════
+- name: "Phase 3 — Configure Plex Media Server"
+  hosts: plex
+  become: true
+  roles:
+    - role: plex
+      tags: plex

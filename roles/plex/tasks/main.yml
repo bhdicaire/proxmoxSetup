@@ -1,0 +1,151 @@
+---
+# ── Install prerequisites ─────────────────────────────────────────
+- name: Install required packages
+  ansible.builtin.apt:
+    name:
+      - curl
+      - gnupg
+      - nfs-common
+      - vainfo
+    state: present
+    update_cache: true
+
+# ── Intel GPU driver (non-free for HEVC/H.265 transcoding) ──────
+- name: Enable non-free-firmware apt component
+  ansible.builtin.replace:
+    path: /etc/apt/sources.list.d/debian.sources
+    regexp: '^(Components:.*)$'
+    replace: 'Components: main contrib non-free non-free-firmware'
+  register: apt_sources
+
+- name: Update apt cache after sources change
+  ansible.builtin.apt:
+    update_cache: true
+  when: apt_sources.changed
+
+- name: Install Intel media driver (non-free for HEVC/VP9)
+  ansible.builtin.apt:
+    name: intel-media-va-driver-non-free
+    state: present
+
+# ── GPU render access ────────────────────────────────────────────
+- name: Ensure render group exists
+  ansible.builtin.group:
+    name: render
+    state: present
+
+- name: Ensure video group exists
+  ansible.builtin.group:
+    name: video
+    state: present
+
+# ── Install Plex Media Server ────────────────────────────────────
+# Debian 13's sqv enforcer deprecated SHA1 signatures as of February 1, 2026, and Plex's repo signing key still uses SHA1. 
+# - name: Add Plex apt signing key
+#   ansible.builtin.get_url:
+#     url: https://downloads.plex.tv/plex-keys/PlexSign.key
+#     dest: /usr/share/keyrings/plex-archive-keyring.asc
+#     mode: "0644"
+# 
+# - name: Add Plex apt repository
+#   ansible.builtin.apt_repository:
+#     repo: "deb [signed-by=/usr/share/keyrings/plex-archive-keyring.asc] https://downloads.plex.tv/repo/deb public main"
+#     filename: plexmediaserver
+#     state: present
+
+- name: Add Plex apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [trusted=yes] https://downloads.plex.tv/repo/deb public main"
+    filename: plexmediaserver
+    state: present
+    update_cache: true
+
+- name: Install Plex Media Server
+  ansible.builtin.apt:
+    name: plexmediaserver
+    state: present
+    update_cache: true
+
+# ── Configure Plex user for GPU transcoding ──────────────────────
+- name: Add plex user to render and video groups
+  ansible.builtin.user:
+    name: plex
+    groups:
+      - render
+      - video
+    append: true
+  notify: Restart Plex
+
+# ── Claim Plex server (first run only) ───────────────────────────
+# The claim token expires in 4 minutes — refresh in 1Password before running!
+- name: Check if Plex is already claimed
+  ansible.builtin.command: >
+    grep -c 'PlexOnlineToken'
+    '/var/lib/plexmediaserver/Library/Application Support/Plex Media Server/Preferences.xml'
+  register: plex_claimed
+  failed_when: false
+  changed_when: false
+
+- name: Claim Plex server with 1Password token
+  when: plex_claimed.rc != 0 or plex_claimed.stdout | trim == "0"
+  block:
+    - name: Stop Plex for claiming
+      ansible.builtin.systemd:
+        name: plexmediaserver
+        state: stopped
+
+    - name: Start Plex with claim token
+      ansible.builtin.systemd:
+        name: plexmediaserver
+        state: started
+      environment:
+        PLEX_CLAIM: "{{ plex_claim_token }}"
+
+    - name: Wait for Plex to initialize and claim
+      ansible.builtin.pause:
+        seconds: 15
+
+# ── Enable hardware transcoding via API (Plex Pass) ─────────────
+- name: Wait for Plex API to be available
+  ansible.builtin.uri:
+    url: "http://localhost:32400/identity"
+    method: GET
+    status_code: 200
+  register: plex_api
+  retries: 12
+  delay: 5
+  until: plex_api.status == 200
+
+- name: Enable hardware transcoding
+  ansible.builtin.uri:
+    url: "http://localhost:32400/:/prefs"
+    method: PUT
+    body_format: form-urlencoded
+    body:
+      HardwareAcceleratedCodecs: 1
+      HardwareAcceleratedEncoders: 1
+    status_code: [200, 201]
+  failed_when: false
+
+# ── Verify GPU access ────────────────────────────────────────────
+- name: Test GPU access with vainfo
+  ansible.builtin.command: vainfo
+  register: vainfo_output
+  changed_when: false
+  failed_when: false
+  environment:
+    LIBVA_DRIVER_NAME: iHD
+
+- name: Display GPU and service status
+  ansible.builtin.debug:
+    msg: |
+      GPU: {{ vainfo_output.stdout_lines | default(['not available']) | first }}
+      Plex service: {{ plex_service.status.ActiveState | default('unknown') }}
+      Web UI: http://{{ ansible_default_ipv4.address }}:32400/web
+
+# ── Ensure Plex is running and enabled ───────────────────────────
+- name: Enable and start Plex Media Server
+  ansible.builtin.systemd:
+    name: plexmediaserver
+    enabled: true
+    state: started

@@ -1,0 +1,8 @@
+---
+# Sensible defaults — override in host_vars as needed
+plex_swap: 0
+plex_bridge: "vmbr0"
+plex_nfs_mountpoint: "/mnt/media"
+
+# 1Password — refresh claim token at https://plex.tv/claim before running!
+plex_claim_token: "{{ lookup('community.general.onepassword', 'Plex', field='claimToken') }}"

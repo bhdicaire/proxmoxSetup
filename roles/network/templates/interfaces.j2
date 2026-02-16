@@ -1,0 +1,40 @@
+# Managed by Ansible — do not edit manually
+# {{ inventory_hostname }} — dual-NIC: mgmt0 (management) + prod0 (VM/LXC traffic)
+# Switch ports configured as trunks; VLANs tagged at the host/VM level
+
+auto lo
+iface lo inet loopback
+
+# ── Management NIC: mgmt0 ────────────────────────────────────────
+# Used for Proxmox Web UI, SSH, and Ansible (including proxmoxer)
+iface mgmt0 inet manual
+
+auto mgmt0.{{ network_mgmt_vlan }}
+iface mgmt0.{{ network_mgmt_vlan }} inet dhcp
+    # IP reserved in Unifi DHCP — this is the Proxmox host address
+
+# ── Production NIC: prod0 ────────────────────────────────────────
+# Trunk for all VM/LXC traffic
+# Each VM/container selects its VLAN tag in Proxmox settings
+iface prod0 inet manual
+
+# VLAN-aware bridge on prod0
+# VMs/containers pick their VLAN tag in Proxmox VM/CT network config
+# Default PVID {{ network_bridge_pvid }} = untagged traffic lands on VLAN {{ network_bridge_pvid }}
+auto vmbr0
+iface vmbr0 inet manual
+    bridge-ports prod0
+    bridge-stp off
+    bridge-fd 0
+    bridge-vlan-aware yes
+    bridge-vids {{ network_bridge_vids }}
+    bridge-pvid {{ network_bridge_pvid }}
+
+{% if network_enable_prod_host_ip %}
+# Host IP on the production network (VLAN {{ network_mgmt_vlan }})
+# Allows Proxmox to reach services on prod: NFS mounts, backup targets, etc.
+auto vmbr0.{{ network_mgmt_vlan }}
+iface vmbr0.{{ network_mgmt_vlan }} inet dhcp
+{% endif %}
+
+source /etc/network/interfaces.d/*

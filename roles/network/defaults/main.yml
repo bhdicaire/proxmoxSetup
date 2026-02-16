@@ -1,0 +1,13 @@
+---
+# Default VLAN for management traffic
+network_mgmt_vlan: 30
+
+# Bridge VLAN range for production traffic
+network_bridge_vids: "2-4094"
+network_bridge_pvid: 30
+
+# Enable host IP on the production bridge (for NFS, backups, etc.)
+network_enable_prod_host_ip: true
+
+# Reboot timeout after network cutover (seconds)
+network_reboot_timeout: 300

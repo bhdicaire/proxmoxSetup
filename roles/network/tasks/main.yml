@@ -1,0 +1,79 @@
+---
+# ── Phase 1: Validate required variables ──────────────────────────
+- name: Validate NIC variables are defined
+  ansible.builtin.assert:
+    that:
+      - network_mgmt_mac is defined
+      - network_prod_mac is defined
+      - network_mgmt_ip is defined
+    fail_msg: >
+      Missing required host_vars: network_mgmt_mac, network_prod_mac,
+      and network_mgmt_ip must be set in host_vars/{{ inventory_hostname }}.yml
+
+# ── Phase 2: Pin NIC names via systemd .link files ───────────────
+- name: Deploy mgmt0 systemd link file
+  ansible.builtin.template:
+    src: systemd-link.j2
+    dest: /etc/systemd/network/10-mgmt0.link
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    link_mac: "{{ network_mgmt_mac }}"
+    link_name: mgmt0
+  register: mgmt_link
+
+- name: Deploy prod0 systemd link file
+  ansible.builtin.template:
+    src: systemd-link.j2
+    dest: /etc/systemd/network/10-prod0.link
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    link_mac: "{{ network_prod_mac }}"
+    link_name: prod0
+  register: prod_link
+
+# ── Phase 3: Deploy /etc/network/interfaces ───────────────────────
+- name: Deploy network interfaces configuration
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  register: interfaces_config
+
+# ── Phase 4: Blacklist unused kernel modules ──────────────────────
+- name: Blacklist Bluetooth and WiFi kernel modules
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/blacklist-unused-wireless.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible — blacklist unused wireless/BT modules
+      blacklist btusb
+      blacklist bluetooth
+      blacklist btrtl
+      blacklist btintel
+      blacklist iwlwifi
+      blacklist iwlmvm
+  register: modprobe_config
+
+- name: Rebuild initramfs after modprobe changes
+  ansible.builtin.command: update-initramfs -u
+  when: modprobe_config.changed
+
+# ── Phase 5: Cutover — reboot and reconnect on new mgmt IP ───────
+- name: Reboot to apply NIC renaming and new network config
+  ansible.builtin.reboot:
+    msg: "Ansible network cutover — rebooting for NIC rename and VLAN config"
+    reboot_timeout: "{{ network_reboot_timeout }}"
+    test_command: ip link show mgmt0
+  vars:
+    # After reboot, reconnect on the new management IP
+    ansible_host: "{{ network_mgmt_ip }}"
+  when: mgmt_link.changed or prod_link.changed or interfaces_config.changed
