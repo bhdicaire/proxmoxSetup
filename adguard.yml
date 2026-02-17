@@ -1,0 +1,150 @@
+---
+# adguard.yml — Provision and configure AdGuard Home DNS LXC on PVE-01
+#
+# Prerequisites:
+#   - 1Password CLI (op) v2+ signed in on the controller
+#   - community.general collection installed
+#   - Unifi DHCP reservation for adguard on dServices (VLAN 30)
+#
+# Usage:
+#   ansible-playbook adguard.yml
+#   ansible-playbook adguard.yml --tags template     # Only ensure LXC template
+#   ansible-playbook adguard.yml --tags provision     # Only create the LXC
+#   ansible-playbook adguard.yml --tags configure     # Only configure AdGuard
+
+# ── Phase 0: Ensure Trixie LXC template exists ─────────────────
+- import_playbook: roles/common/tasks/ensureTemplate.yml
+
+# ── Phase 1: Provision LXC container ───────────────────────────
+- name: Provision AdGuard Home LXC container on Proxmox
+  hosts: pve-01
+  become: true
+  gather_facts: false
+  tags: [provision]
+
+  tasks:
+    - name: Check if container already exists
+      ansible.builtin.command: "pct status 120"
+      register: pct_status
+      failed_when: false
+      changed_when: false
+
+    - name: Write ops public key for container injection
+      ansible.builtin.copy:
+        content: "{{ ops_ssh_public_key }}\n"
+        dest: /tmp/ops_authorized_key
+        mode: "0644"
+      when: pct_status.rc != 0
+
+    - name: Create AdGuard Home LXC container
+      ansible.builtin.command: >
+        pct create 120 {{ pve_lxc_template_resolved }}
+        --hostname adguard
+        --cores 1
+        --memory 512
+        --swap 0
+        --rootfs local-zfs:4
+        --net0 name=eth0,bridge=vmbr0,tag=50,ip=172.30.50.10/24,gw=172.30.50.1,firewall=1
+        --nameserver {{ hostvars['adguard']['adguard_nameserver'] }}
+        --searchdomain {{ hostvars['adguard']['adguard_search_domain'] }}
+        --ostype debian
+        --unprivileged 1
+        --features nesting=1
+        --onboot 1
+        --start 0
+        --ssh-public-keys /tmp/ops_authorized_key
+      when: pct_status.rc != 0
+
+    - name: Update container configuration
+      ansible.builtin.command: >
+        pct set 120
+        --cores 1
+        --memory 512
+        --swap 0
+        --net0 name=eth0,bridge=vmbr0,tag=50,ip=172.30.50.10/24,gw=172.30.50.1,firewall=1
+        --nameserver {{ hostvars['adguard']['adguard_nameserver'] }}
+        --searchdomain {{ hostvars['adguard']['adguard_search_domain'] }}
+        --onboot 1
+      changed_when: false
+
+    - name: Remove temporary SSH key file
+      ansible.builtin.file:
+        path: /tmp/ops_authorized_key
+        state: absent
+
+    - name: Start AdGuard Home container
+      ansible.builtin.command: "pct start 120"
+      register: pct_start
+      failed_when: pct_start.rc != 0 and 'already running' not in pct_start.stderr
+      changed_when: "'already running' not in pct_start.stderr"
+
+    - name: Wait for container to be ready
+      ansible.builtin.pause:
+        seconds: 10
+
+# ── Phase 2: Bootstrap ops user (via pct exec) ─────────────────
+- name: Bootstrap ops user in AdGuard Home container
+  hosts: pve-01
+  become: true
+  gather_facts: false
+  tags: [provision]
+
+  tasks:
+    - name: Check if ops user already exists
+      ansible.builtin.command: "pct exec 120 -- id ops"
+      register: ops_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create ops user with sudo and SSH key
+      ansible.builtin.shell: |
+        pct exec 120 -- bash -c '
+          apt-get update -qq
+          apt-get install -y -qq sudo openssh-server > /dev/null
+          useradd -m -s /bin/bash -G sudo ops
+          echo "ops ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ops
+          chmod 0440 /etc/sudoers.d/ops
+          mkdir -p /home/ops/.ssh
+          echo "{{ ops_ssh_public_key }}" > /home/ops/.ssh/authorized_keys
+          chmod 700 /home/ops/.ssh
+          chmod 600 /home/ops/.ssh/authorized_keys
+          chown -R ops:ops /home/ops/.ssh
+          systemctl enable --now ssh
+        '
+      when: ops_check.rc != 0
+
+    - name: Wait for DHCP lease
+      ansible.builtin.shell: |
+        for i in $(seq 1 30); do
+          IP=$(pct exec 120 -- ip -4 addr show eth0 2>/dev/null | grep -oP 'inet \K[\d.]+')
+          if [ -n "$IP" ]; then
+            echo "$IP"
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      register: container_ip
+      changed_when: false
+
+    - name: Display AdGuard Home container IP
+      ansible.builtin.debug:
+        msg: "AdGuard Home container IP: {{ container_ip.stdout | trim }}"
+
+    - name: Wait for SSH to be reachable
+      ansible.builtin.wait_for:
+        host: "{{ hostvars['adguard']['ansible_host'] }}"
+        port: 22
+        delay: 5
+        timeout: 90
+
+# ── Phase 3: Configure AdGuard Home ────────────────────────────
+- name: Configure AdGuard Home DNS
+  hosts: adguard
+  become: true
+  gather_facts: true
+  tags: [configure]
+
+  roles:
+    - role: common
+    - role: adguard

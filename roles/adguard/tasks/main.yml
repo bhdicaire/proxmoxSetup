@@ -1,0 +1,40 @@
+---
+# roles/adguard/tasks/main.yml — Install and configure AdGuard Home
+
+# ── Install AdGuard Home ─────────────────────────────────────────
+- name: Check if AdGuard Home is installed
+  ansible.builtin.stat:
+    path: /opt/AdGuardHome/AdGuardHome
+  register: adguard_binary
+
+- name: Download and install AdGuard Home
+  ansible.builtin.shell: |
+    curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
+  args:
+    creates: /opt/AdGuardHome/AdGuardHome
+  when: not adguard_binary.stat.exists
+
+# ── Stop service before config changes ───────────────────────────
+- name: Stop AdGuard Home for configuration
+  ansible.builtin.systemd:
+    name: AdGuardHome
+    state: stopped
+  failed_when: false
+
+# ── Deploy configuration ─────────────────────────────────────────
+- name: Deploy AdGuard Home configuration
+  ansible.builtin.template:
+    src: AdGuardHome.yaml.j2
+    dest: /opt/AdGuardHome/AdGuardHome.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart AdGuard Home
+
+# ── Ensure AdGuard Home is running ───────────────────────────────
+- name: Ensure AdGuard Home is enabled and running
+  ansible.builtin.systemd:
+    name: AdGuardHome
+    state: started
+    enabled: true
+    daemon_reload: true

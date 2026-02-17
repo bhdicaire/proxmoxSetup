@@ -1,0 +1,118 @@
+## AdGuard Home configuration — managed by Ansible
+## Do not edit manually; changes will be overwritten.
+
+http:
+  pprof:
+    port: 6060
+    enabled: false
+  address: 0.0.0.0:{{ adguard_web_port }}
+  session_ttl: 720h
+
+users:
+  - name: {{ adguard_admin_user }}
+    password: {{ adguard_admin_password_hash }}
+
+auth_attempts: 5
+block_auth_min: 15
+
+dns:
+  bind_hosts:
+    - 0.0.0.0
+  port: 53
+
+  # Upstream DNS servers
+  upstream_dns:
+{% for server in adguard_upstream_dns %}
+    - {{ server }}
+{% endfor %}
+
+  # Bootstrap DNS (used to resolve upstream DoH/DoT hostnames)
+  bootstrap_dns:
+{% for server in adguard_bootstrap_dns %}
+    - {{ server }}
+{% endfor %}
+
+  # Performance
+  all_servers: false
+  fastest_addr: true
+  cache_size: 4194304
+  cache_ttl_min: 0
+  cache_ttl_max: 0
+  cache_optimistic: true
+
+  # Security
+  enable_dnssec: true
+  aaaa_disabled: true
+
+  # Rate limiting
+  ratelimit: 0
+  ratelimit_subnet_len_ipv4: 24
+  ratelimit_subnet_len_ipv6: 56
+
+  # Access control
+  allowed_clients: []
+  disallowed_clients: []
+  blocked_hosts:
+    - version.bind
+    - id.server
+    - hostname.bind
+
+  protection_enabled: true
+  filtering_enabled: true
+  blocking_mode: default
+
+  # Local PTR resolvers
+  local_ptr_upstreams: []
+  use_private_ptr_resolvers: false
+
+tls:
+  enabled: false
+
+querylog:
+  dir_path: ""
+  ignored: []
+  interval: 24h
+  size_memory: 1000
+  enabled: true
+  file_enabled: true
+
+statistics:
+  dir_path: ""
+  ignored: []
+  interval: 168h
+  enabled: true
+
+filters:
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
+    name: AdGuard DNS filter
+    id: 1
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
+    name: AdAway Default Blocklist
+    id: 2
+
+# DNS rewrites — internal services via Caddy
+dhcp:
+  enabled: false
+
+filtering:
+  rewrites:
+{% for rewrite in adguard_dns_rewrites %}
+    - domain: "{{ rewrite.domain }}"
+      answer: "{{ rewrite.answer }}"
+{% endfor %}
+
+  safe_search:
+    enabled: false
+
+log:
+  file: ""
+  max_backups: 0
+  max_size: 100
+  max_age: 3
+  compress: false
+  local_time: false
+  verbose: false
+
+schema_version: 29

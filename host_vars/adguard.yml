@@ -1,0 +1,31 @@
+---
+# host_vars/adguard.yml — AdGuard Home LXC on dServices VLAN 50
+# VMID: 120 on PVE-01
+# IP: Unifi DHCP reservation
+
+adguard_nameserver: "172.30.50.1"
+adguard_search_domain: "lab.local"
+
+# Web UI
+adguard_web_port: 3000
+adguard_admin_user: "admin"
+# Generate hash: htpasswd -B -n -b "" yourpassword | cut -d: -f2
+# Default below is for "changeme" — update in 1Password
+adguard_admin_password_hash: "{{ adguard_admin_password }}"
+
+# Upstream DNS (DoH for privacy)
+adguard_upstream_dns:
+  - "https://dns.cloudflare.com/dns-query"
+  - "https://dns.quad9.net/dns-query"
+
+# Bootstrap DNS (plain IP, used to resolve DoH hostnames)
+adguard_bootstrap_dns:
+  - "1.1.1.1"
+  - "9.9.9.9"
+
+# DNS rewrites — route *.d5e.dev to Caddy
+adguard_dns_rewrites:
+  - domain: "*.d5e.dev"
+    answer: "172.30.50.30"
+  - domain: "d5e.dev"
+    answer: "172.30.50.30"
