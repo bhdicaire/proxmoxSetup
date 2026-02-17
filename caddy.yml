@@ -134,12 +134,12 @@
       ansible.builtin.debug:
         msg: "Caddy container IP: {{ container_ip.stdout | trim }}"
 
-    - name: Wait for SSH to be reachable
-      ansible.builtin.wait_for:
-        host: "{{ hostvars['caddy']['ansible_host'] }}"
-        port: 22
-        delay: 5
-        timeout: 90
+#     - name: Wait for SSH to be reachable
+#       ansible.builtin.wait_for:
+#         host: "{{ hostvars['caddy']['ansible_host'] }}"
+#         port: 22
+#         delay: 5
+#         timeout: 90
 
 # ── Phase 3: Configure Caddy (connects via SSH as ops) ─────────
 - name: Configure Caddy reverse proxy

@@ -37,13 +37,14 @@
 
 # ── Caddy configuration ────────────────────────────────────────
 
-- name: Create log directory
+- name: Create Caddy log directory
   ansible.builtin.file:
-    path: "{{ caddy_log_dir }}"
+    path: /var/log/caddy
     state: directory
-    owner: "{{ caddy_user }}"
-    group: "{{ caddy_group }}"
-    mode: "0750"
+    owner: caddy
+    group: caddy
+    mode: "0755"
+    recurse: true
 
 - name: Configure NAS mounts
   ansible.posix.mount:
