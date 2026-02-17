@@ -1,45 +1,38 @@
 # Caddyfile — managed by Ansible
-# Do not edit manually; changes will be overwritten.
+# Wildcard cert for *.{{ caddy_domain }} via Cloudflare DNS-01
+
 {
-  admin {{ caddy_admin_api }}
-{% if caddy_email %}
-  email {{ caddy_email }}
-{% endif %}
-{% for key, value in (caddy_global_options | default({})).items() %}
-  {{ key }} {{ value }}
-{% endfor %}
+    admin off
+    email {{ caddy_acme_email }}
 }
+
+*.{{ caddy_domain }} {
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+    }
 
 {% for site in caddy_sites %}
-{{ site.domain }} {
-{% if site.tls_internal | default(false) %}
-  tls internal
-{% elif site.tls_options is defined %}
-  tls {{ site.tls_options }}
+    @{{ site.subdomain }} host {{ site.subdomain }}.{{ caddy_domain }}
+    handle @{{ site.subdomain }} {
+        reverse_proxy {{ site.upstream }} {
+{% if site.tls_insecure | default(false) %}
+            transport http {
+                tls_insecure_skip_verify
+            }
 {% endif %}
-
-  reverse_proxy {{ site.upstream }} {
-{% if site.upstream is match("^https://") %}
-    transport http {
-      tls_insecure_skip_verify
+        }
     }
-{% endif %}
-{% if site.health_check | default(false) %}
-    health_uri {{ site.health_uri | default('/') }}
-    health_interval {{ site.health_interval | default('30s') }}
-{% endif %}
-  }
-
-  log {
-    output file {{ caddy_log_dir }}/{{ site.domain | replace('.', '_') }}.log {
-      roll_size 10mb
-      roll_keep 5
-    }
-  }
-{% if site.extra_config is defined %}
-
-  {{ site.extra_config | indent(1, false) }}
-{% endif %}
-}
 
 {% endfor %}
+    # Catch-all for unconfigured subdomains
+    handle {
+        respond "Service not configured" 404
+    }
+
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 10mb
+            roll_keep 5
+        }
+    }
+}

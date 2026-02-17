@@ -1,30 +1,34 @@
 ---
-# Caddy LXC — dProxy VLAN 50
-# VMID: 150 on PVE01
-# IP assigned via Unifi DHCP host reservation
+# host_vars/caddy.yml — Caddy LXC on dProxy VLAN 50
+# VMID: 150 on PVE-01
+# IP: 172.30.50.30 (Unifi DHCP reservation)
 
 caddy_nameserver: "172.30.50.1"
 caddy_search_domain: "lab.local"
 
-# Upstream services Caddy will proxy to
+# ACME / Cloudflare
+caddy_acme_email: "code@dicaire.com"
+caddy_domain: "d5e.dev"
+
+# Upstream services Caddy will proxy
 caddy_sites:
-  - domain: "proxmox.lab.local"
+  - subdomain: proxmox
     upstream: "https://172.30.30.11:8006"
-    tls_internal: true
+    tls_insecure: true
 
-  - domain: "proxmox2.lab.local"
-    upstream: "https://172.30.30.12:8006"
-    tls_internal: true
+  # - subdomain: proxmox2
+  #   upstream: "https://172.30.30.12:8006"
+  #   tls_insecure: true
 
-  - domain: "nas.lab.local"
-    upstream: "http://172.30.20.10:5000"
-    tls_internal: true
+  # - subdomain: nas
+  #   upstream: "http://172.30.20.10:5000"
+  #   tls_insecure: false
 
-  # - domain: "splunk.lab.local"
+  # - subdomain: splunk
   #   upstream: "https://172.30.30.20:8000"
-  #   tls_internal: true
+  #   tls_insecure: true
 
-# Optional: NFS mount from uNAS on dStorage (VLAN 20)
+# Optional: NFS mounts from uNAS on dStorage (VLAN 20)
 caddy_nas_mounts: []
   # - src: "172.30.20.10:/volume1/web"
   #   dest: "/srv/www"

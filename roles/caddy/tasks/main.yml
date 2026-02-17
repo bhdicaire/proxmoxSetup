@@ -1,7 +1,22 @@
 ---
-# ── Caddy installation ──────────────────────────────────────────
+# roles/caddy/tasks/main.yml — Caddy with Cloudflare DNS plugin
 
-- name: Install prerequisites
+# ── Remove apt-installed Caddy (replaced by custom build) ───────
+- name: Remove apt-installed Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: absent
+
+- name: Remove Caddy apt repo and key
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/caddy-stable.list
+    - /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+
+# ── Install build dependencies ──────────────────────────────────
+- name: Install build dependencies
   ansible.builtin.apt:
     name:
       - debian-keyring
@@ -9,43 +24,118 @@
       - apt-transport-https
       - curl
       - nfs-common
+      - golang
     state: present
     update_cache: true
 
-- name: Add Caddy GPG key
+# ── Build custom Caddy with Cloudflare module ───────────────────
+- name: Install xcaddy
   ansible.builtin.shell: |
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | \
-      gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    GOBIN=/usr/local/bin go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
   args:
-    creates: /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  when: caddy_install_method == "repo"
+    creates: /usr/local/bin/xcaddy
+  environment:
+    GOPATH: /root/go
 
-- name: Add Caddy apt repository
+- name: Build Caddy with Cloudflare DNS plugin
   ansible.builtin.shell: |
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | \
-      tee /etc/apt/sources.list.d/caddy-stable.list
+    xcaddy build \
+      --with github.com/caddy-dns/cloudflare \
+      --output /usr/bin/caddy
   args:
-    creates: /etc/apt/sources.list.d/caddy-stable.list
-  when: caddy_install_method == "repo"
+    creates: /etc/caddy/.custom-build-stamp
+  environment:
+    GOPATH: /root/go
+    PATH: "/usr/local/bin:/usr/bin:/bin"
+  register: caddy_build
 
-- name: Install Caddy
-  ansible.builtin.apt:
+- name: Stamp custom build
+  ansible.builtin.copy:
+    content: "Built with cloudflare plugin on {{ ansible_date_time.iso8601 }}\n"
+    dest: /etc/caddy/.custom-build-stamp
+    mode: "0644"
+  when: caddy_build.changed
+
+# ── Caddy user and directories ──────────────────────────────────
+- name: Create caddy group
+  ansible.builtin.group:
     name: caddy
-    state: present
-    update_cache: true
-  when: caddy_install_method == "repo"
+    system: true
 
-# ── Caddy configuration ────────────────────────────────────────
-
-- name: Create Caddy log directory
-  ansible.builtin.file:
-    path: /var/log/caddy
-    state: directory
-    owner: caddy
+- name: Create caddy user
+  ansible.builtin.user:
+    name: caddy
     group: caddy
-    mode: "0755"
-    recurse: true
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/caddy
+    create_home: true
 
+- name: Create Caddy directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('caddy') }}"
+    group: "{{ item.group | default('caddy') }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: /etc/caddy, owner: root, group: root }
+    - { path: /var/log/caddy }
+    - { path: /var/lib/caddy, mode: "0700" }
+    - { path: /var/lib/caddy/.config, mode: "0700" }
+    - { path: /var/lib/caddy/.local, mode: "0700" }
+
+# ── Systemd service ─────────────────────────────────────────────
+- name: Install Caddy systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/caddy.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Caddy
+      Documentation=https://caddyserver.com/docs/
+      After=network.target network-online.target
+      Requires=network-online.target
+
+      [Service]
+      Type=notify
+      User=caddy
+      Group=caddy
+      EnvironmentFile=/etc/caddy/environment
+      ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
+      ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+      TimeoutStopSec=5s
+      LimitNOFILE=1048576
+      LimitNPROC=512
+      AmbientCapabilities=CAP_NET_BIND_SERVICE
+      NoNewPrivileges=true
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart Caddy
+
+- name: Deploy Cloudflare API token
+  ansible.builtin.copy:
+    dest: /etc/caddy/environment
+    content: |
+      CF_API_TOKEN={{ cloudflare_api_token }}
+    owner: root
+    group: caddy
+    mode: "0640"
+  no_log: true
+  notify: Restart Caddy
+
+# ── Caddyfile ────────────────────────────────────────────────────
+- name: Deploy Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: caddy
+    mode: "0644"
+  notify: Reload Caddy
+
+# ── NAS mounts (optional) ───────────────────────────────────────
 - name: Configure NAS mounts
   ansible.posix.mount:
     src: "{{ item.src }}"
@@ -54,20 +144,12 @@
     opts: "{{ item.opts | default('ro,soft,timeo=5') }}"
     state: mounted
   loop: "{{ caddy_nas_mounts }}"
-  when: caddy_nas_mounts | length > 0
+  when: caddy_nas_mounts is defined and caddy_nas_mounts | length > 0
 
-- name: Deploy Caddyfile
-  ansible.builtin.template:
-    src: Caddyfile.j2
-    dest: "{{ caddy_config_dir }}/Caddyfile"
-    owner: root
-    group: "{{ caddy_group }}"
-    mode: "0644"
-    validate: "caddy validate --config %s --adapter caddyfile"
-  notify: Reload Caddy
-
+# ── Start Caddy ──────────────────────────────────────────────────
 - name: Ensure Caddy is enabled and running
   ansible.builtin.systemd:
     name: caddy
-    enabled: true
     state: started
+    enabled: true
+    daemon_reload: true
