@@ -17,65 +17,131 @@
 
 # ── Phase 1: Provision LXC container ───────────────────────────
 - name: Provision Caddy LXC container on Proxmox
-  hosts: localhost
-  connection: local
+  hosts: pve-01
+  become: true
   gather_facts: false
-  become: false 
-  tags: [provision] 
-
-  vars:
-    proxmox_host: "pve-01"
-    proxmox_api_host: "{{ hostvars['pve-01']['ansible_host'] }}"
-    lxc_template: >-
-      {{ hostvars['pve-01']['pve_lxc_template_resolved']
-         | default('local:vztmpl/' + pve_lxc_template_distro + '_latest.tar.zst') }}
+  tags: [provision]
 
   tasks:
+    # ── Create container if it doesn't exist ─────────────────────
+    - name: Check if container already exists
+      ansible.builtin.command: "pct status 150"
+      register: pct_status
+      failed_when: false
+      changed_when: false
+
+    - name: Write ops public key for container injection
+      ansible.builtin.copy:
+        content: "{{ ops_ssh_public_key }}\n"
+        dest: /tmp/ops_authorized_key
+        mode: "0644"
+      when: pct_status.rc != 0
+
     - name: Create Caddy LXC container
-      community.proxmox.proxmox:
-        api_host: "{{ proxmox_api_host }}"
-        api_user: "{{ pve_01_api_user }}"
-        api_token_id: "{{ pve_01_api_token_id }}"
-        api_token_secret: "{{ pve_01_api_token_secret }}"
-        validate_certs: false
-        node: "{{ proxmox_host }}"
-        hostname: "caddy"
-        vmid: 150
-        ostemplate: "{{ lxc_template }}"
-        storage: "local-lvm"
-        disk: "4"
-        cores: 1
-        memory: 512
-        swap: 0
-        nameserver: "{{ hostvars['caddy']['caddy_nameserver'] }}"
-        searchdomain: "{{ hostvars['caddy']['caddy_search_domain'] }}"
-        netif: '{"net0":"name=eth0,bridge=vmbr0,tag=50,ip=dhcp,firewall=1"}'
-        pubkey: "{{ ops_ssh_public_key }}"
-        onboot: true
-        unprivileged: true
-        features:
-          - nesting=1
-        state: present
+      ansible.builtin.command: >
+        pct create 150 {{ pve_lxc_template_resolved }}
+        --hostname caddy
+        --cores 1
+        --memory 512
+        --swap 0
+        --rootfs local-zfs:4
+        --net0 name=eth0,bridge=vmbr0,tag=50,ip=dhcp,firewall=1
+        --nameserver {{ hostvars['caddy']['caddy_nameserver'] }}
+        --searchdomain {{ hostvars['caddy']['caddy_search_domain'] }}
+        --ostype debian
+        --unprivileged 1
+        --features nesting=1
+        --onboot 1
+        --start 0
+        --ssh-public-keys /tmp/ops_authorized_key
+      when: pct_status.rc != 0
 
-    - name: Start Caddy LXC container
-      community.proxmox.proxmox:
-        api_host: "{{ proxmox_api_host }}"
-        api_user: "{{ pve_01_api_user }}"
-        api_token_id: "{{ pve_01_api_token_id }}"
-        api_token_secret: "{{ pve_01_api_token_secret }}"
-        validate_certs: false
-        node: "{{ proxmox_host }}"
-        vmid: 150
-        state: started
+    - name: Remove temporary SSH key file
+      ansible.builtin.file:
+        path: /tmp/ops_authorized_key
+        state: absent
 
-    - name: Wait for container to get DHCP lease and become reachable
+    # ── Apply config updates (idempotent — runs every time) ──────
+    - name: Update container configuration
+      ansible.builtin.command: >
+        pct set 150
+        --cores 1
+        --memory 512
+        --swap 0
+        --nameserver {{ hostvars['caddy']['caddy_nameserver'] }}
+        --searchdomain {{ hostvars['caddy']['caddy_search_domain'] }}
+        --onboot 1
+      changed_when: false
+
+    # ── Start container ──────────────────────────────────────────
+    - name: Start Caddy container
+      ansible.builtin.command: "pct start 150"
+      register: pct_start
+      failed_when: pct_start.rc != 0 and 'already running' not in pct_start.stderr
+      changed_when: "'already running' not in pct_start.stderr"
+
+    - name: Wait for container to be ready
+      ansible.builtin.pause:
+        seconds: 10
+
+# ── Phase 2: Bootstrap ops user (via pct exec from PVE host) ───
+- name: Bootstrap ops user in Caddy container
+  hosts: pve-01
+  become: true
+  gather_facts: false
+  tags: [provision]
+
+  tasks:
+    - name: Check if ops user already exists
+      ansible.builtin.command: "pct exec 150 -- id ops"
+      register: ops_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create ops user with sudo and SSH key
+      ansible.builtin.shell: |
+        pct exec 150 -- bash -c '
+          apt-get update -qq
+          apt-get install -y -qq sudo openssh-server > /dev/null
+          useradd -m -s /bin/bash -G sudo ops
+          echo "ops ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ops
+          chmod 0440 /etc/sudoers.d/ops
+          mkdir -p /home/ops/.ssh
+          echo "{{ ops_ssh_public_key }}" > /home/ops/.ssh/authorized_keys
+          chmod 700 /home/ops/.ssh
+          chmod 600 /home/ops/.ssh/authorized_keys
+          chown -R ops:ops /home/ops/.ssh
+          systemctl enable --now ssh
+        '
+      when: ops_check.rc != 0
+
+    # ── Get container IP for Phase 3 ─────────────────────────────
+    - name: Wait for DHCP lease
+      ansible.builtin.shell: |
+        for i in $(seq 1 30); do
+          IP=$(pct exec 150 -- ip -4 addr show eth0 2>/dev/null | grep -oP 'inet \K[\d.]+')
+          if [ -n "$IP" ]; then
+            echo "$IP"
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      register: container_ip
+      changed_when: false
+
+    - name: Display Caddy container IP
+      ansible.builtin.debug:
+        msg: "Caddy container IP: {{ container_ip.stdout | trim }}"
+
+    - name: Wait for SSH to be reachable
       ansible.builtin.wait_for:
         host: "{{ hostvars['caddy']['ansible_host'] }}"
         port: 22
-        delay: 10
+        delay: 5
         timeout: 90
 
-# ── Phase 2: Configure Caddy ───────────────────────────────────
+# ── Phase 3: Configure Caddy (connects via SSH as ops) ─────────
 - name: Configure Caddy reverse proxy
   hosts: caddy
   become: true

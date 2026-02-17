@@ -1,112 +1,31 @@
 ---
-# --- SYSTEM CONFIG (TIME & NTP) ---
-- name: Set system timezone
-  timezone:
-    name: "{{ timezone }}"
+# ── Detect environment ──────────────────────────────────────────
+- name: Check if this is a Proxmox host
+  ansible.builtin.stat:
+    path: /usr/bin/pvesh
+  register: is_pve_host
 
-- name: Ensure systemd-timesyncd is installed
-  apt:
-    name: systemd-timesyncd
-    state: present
-
-- name: Configure NTP
-  lineinfile:
-    path: /etc/systemd/timesyncd.conf
-    regexp: '^#?NTP='
-    line: "NTP={{ ntp_server }}"
-  notify: Restart Timesyncd
-
-# --- REPOSITORY MANAGEMENT ---
-- name: Remove problematic Enterprise source files
-  file:
-    path: "/etc/apt/sources.list.d/{{ item }}"
-    state: absent
-  loop: "{{ pve_enterprise_sources_to_remove }}"
-
-- name: Create No-Subscription source file
-  copy:
-    dest: /etc/apt/sources.list.d/pve-no-sub.sources
-    content: |
-      Types: deb
-      URIs: http://download.proxmox.com/debian/pve
-      Suites: trixie
-      Components: pve-no-subscription
-      Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
-
-- name: Install dependencies
-  apt:
-    update_cache: yes
-    name:
-      - python3-proxmoxer
-      - ifupdown2
-      - sudo
-    state: present
-
-- name: Safe Proxmox Upgrade
-  apt:
-    upgrade: dist
-
-- name: Disable "No valid subscription" nag
-  ansible.builtin.shell:
-    cmd: >-
-      sed -Ezi.bak
-      "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g"
-      /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
-  args:
-    creates: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js.bak
-  notify: Restart PVEProxy
-
-# --- CONSOLE BANNER ---
-- name: Fix stale IP in login banner
-  copy:
-    dest: /etc/issue
-    content: |
-      Welcome to the Proxmox Virtual Environment
-      Please use your web browser to configure this server - connect to:
-        https://{{ ansible_host }}:8006/
-
-# --- HOSTNAME ---
-- name: Set hostname
-  hostname:
-    name: "{{ inventory_hostname }}"
-
-- name: Update /etc/hosts
-  lineinfile:
-    path: /etc/hosts
-    regexp: '127\.0\.1\.1.*'
-    line: "127.0.1.1 {{ inventory_hostname }}"
-
-# --- DISABLE IPv6 ---
-- name: Deploy sysctl config to disable IPv6
-  template:
-    src: 99-disable-ipv6.conf.j2
-    dest: /etc/sysctl.d/99-disable-ipv6.conf
-  notify: Reboot and wait
-
-# --- LXC TEMPLATES ---
-- name: Update template catalog
-  command: pveam update
+# ── Container cleanup (remove PVE repos that lack signing keys) ─
+- name: Remove Proxmox repos from containers
+  ansible.builtin.shell: "rm -f /etc/apt/sources.list.d/pve-* /etc/apt/sources.list.d/ceph*"
   changed_when: false
+  when: not is_pve_host.stat.exists
 
-- name: Download LXC templates
-  command: pveam download {{ item.storage }} {{ item.template }}
+# ── Baseline setup (runs everywhere) ───────────────────────────
+- name: Generate locale
+  ansible.builtin.shell: |
+    sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen
+    locale-gen
+    update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
   args:
-    creates: "/var/lib/vz/template/cache/{{ item.template }}"
-  loop: "{{ pve_lxc_templates }}"
+    creates: /usr/lib/locale/locale-archive
 
-# --- ISO IMAGES ---
-- name: Download ISO images
-  get_url:
-    url: "{{ item.url }}"
-    dest: "{{ item.dest }}"
-    mode: '0644'
-  loop: "{{ pve_iso_images }}"
-
-# ── ops user setup ──────────────────────────────────────────────
-
-- name: Install sudo
+- name: Install sudo and dependencies
   ansible.builtin.apt:
-    name: sudo
+    name:
+      - sudo
+      - curl
+      - git
     state: present
     update_cache: true
 
@@ -134,8 +53,6 @@
     mode: "0440"
     validate: "visudo -cf %s"
 
-# ── SSH hardening ───────────────────────────────────────────────
-
 - name: Harden SSH — disable root login and password auth
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
@@ -146,3 +63,111 @@
     - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
     - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
   notify: Restart SSH
+
+- name: Install chezmoi and apply dotfiles
+  ansible.builtin.shell: |
+    sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /home/{{ common_ops_user }}/.config/bin init --apply bhdicaire
+  args:
+    creates: /home/{{ common_ops_user }}/.local/share/chezmoi
+  become: true
+  become_user: "{{ common_ops_user }}"
+
+# ── PVE host tasks (skipped inside containers) ─────────────────
+- name: Configure Proxmox host
+  when: is_pve_host.stat.exists
+  block:
+    - name: Set system timezone
+      ansible.builtin.timezone:
+        name: "{{ timezone }}"
+
+    - name: Ensure systemd-timesyncd is installed
+      ansible.builtin.apt:
+        name: systemd-timesyncd
+        state: present
+
+    - name: Configure NTP
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/timesyncd.conf
+        regexp: '^#?NTP='
+        line: "NTP={{ ntp_server }}"
+      notify: Restart Timesyncd
+
+    - name: Remove problematic Enterprise source files
+      ansible.builtin.file:
+        path: "/etc/apt/sources.list.d/{{ item }}"
+        state: absent
+      loop: "{{ pve_enterprise_sources_to_remove }}"
+
+    - name: Create No-Subscription source file
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/pve-no-sub.sources
+        content: |
+          Types: deb
+          URIs: http://download.proxmox.com/debian/pve
+          Suites: trixie
+          Components: pve-no-subscription
+          Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+
+    - name: Install PVE dependencies
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - python3-proxmoxer
+          - ifupdown2
+          - sudo
+        state: present
+
+    - name: Safe Proxmox Upgrade
+      ansible.builtin.apt:
+        upgrade: dist
+
+    - name: Disable "No valid subscription" nag
+      ansible.builtin.shell:
+        cmd: >-
+          sed -Ezi.bak
+          "s/(Ext.Msg.show\(\{\s+title: gettext\('No valid sub)/void\(\{ \/\/\1/g"
+          /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+      args:
+        creates: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js.bak
+      notify: Restart PVEProxy
+
+    - name: Fix stale IP in login banner
+      ansible.builtin.copy:
+        dest: /etc/issue
+        content: |
+          Welcome to the Proxmox Virtual Environment
+          Please use your web browser to configure this server - connect to:
+            https://{{ ansible_host }}:8006/
+
+    - name: Set hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: Update /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '127\.0\.1\.1.*'
+        line: "127.0.1.1 {{ inventory_hostname }}"
+
+    - name: Deploy sysctl config to disable IPv6
+      ansible.builtin.template:
+        src: 99-disable-ipv6.conf.j2
+        dest: /etc/sysctl.d/99-disable-ipv6.conf
+      notify: Reboot and wait
+
+    - name: Update template catalog
+      ansible.builtin.command: pveam update
+      changed_when: false
+
+    - name: Download LXC templates
+      ansible.builtin.command: pveam download {{ item.storage }} {{ item.template }}
+      args:
+        creates: "/var/lib/vz/template/cache/{{ item.template }}"
+      loop: "{{ pve_lxc_templates }}"
+
+    - name: Download ISO images
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "{{ item.dest }}"
+        mode: '0644'
+      loop: "{{ pve_iso_images }}"

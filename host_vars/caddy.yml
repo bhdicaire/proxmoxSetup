@@ -9,7 +9,11 @@ caddy_search_domain: "lab.local"
 # Upstream services Caddy will proxy to
 caddy_sites:
   - domain: "proxmox.lab.local"
-    upstream: "https://172.30.30.1:8006"
+    upstream: "https://172.30.30.11:8006"
+    tls_internal: true
+
+  - domain: "proxmox2.lab.local"
+    upstream: "https://172.30.30.12:8006"
     tls_internal: true
 
   - domain: "nas.lab.local"
